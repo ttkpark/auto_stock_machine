@@ -24,6 +24,7 @@ class RealBroker(BaseBroker):
         self.app_secret = os.environ.get("KIS_REAL_APP_SECRET", "")
         self.account_number = os.environ.get("KIS_REAL_ACCOUNT_NUMBER", "")
         self._access_token: Optional[str] = None
+        self.last_order_error: str = ""
 
         if not all([self.app_key, self.app_secret, self.account_number]):
             raise EnvironmentError(
@@ -165,12 +166,15 @@ class RealBroker(BaseBroker):
             resp.raise_for_status()
             result = resp.json()
             if result.get("rt_cd") == "0":
+                self.last_order_error = ""
                 logger.info(f"[RealBroker] 매수 성공: {ticker} {qty}주")
                 return True
             else:
-                logger.error(f"[RealBroker] 매수 실패: {result.get('msg1')}")
+                self.last_order_error = str(result.get("msg1", "원인 미상"))
+                logger.error(f"[RealBroker] 매수 실패: {self.last_order_error}")
                 return False
         except Exception as e:
+            self.last_order_error = str(e)
             logger.error(f"[RealBroker] 매수 주문 오류 ({ticker}): {e}")
             return False
 

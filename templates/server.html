@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% set active_page = "server" %}
+{% set title = "서버상태" %}
+{% block content %}
+  <div class="card">
+    <h2>서버 상태</h2>
+    <table>
+      <tbody>
+        <tr><th style="width:220px;">웹 주소</th><td>{{ status.host }}</td></tr>
+        <tr><th>Python 버전</th><td>{{ status.python }}</td></tr>
+        <tr><th>플랫폼</th><td>{{ status.platform }}</td></tr>
+        <tr><th>작업 경로</th><td><code>{{ status.cwd }}</code></td></tr>
+        <tr><th>가상환경 경로</th><td><code>{{ status.venv }}</code></td></tr>
+        <tr><th>웹 대시보드 업타임</th><td>{{ status.uptime_sec }}초</td></tr>
+        <tr><th>마지막 로그 갱신</th><td>{{ status.last_log_update }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

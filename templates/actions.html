@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% set active_page = "actions" %}
+{% set title = "액션실행" %}
+{% block content %}
+  <div class="card">
+    <h2>수동 액션 실행</h2>
+    <div class="sub">웹에서 바로 `main.py --mode ...`를 실행합니다.</div>
+    <form method="post" action="/actions/run" style="display:flex;gap:8px;margin-top:10px;">
+      <button class="btn btn-primary" name="action" value="buy" type="submit">매수 실행</button>
+      <button class="btn btn-primary" name="action" value="sell" type="submit">매도 실행</button>
+      <button class="btn btn-gray" name="action" value="status" type="submit">현황 보고 실행</button>
+    </form>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h2>웹 실행 이력</h2>
+      {% if history %}
+        <table>
+          <thead><tr><th>시간</th><th>액션</th><th>상태</th><th>상세</th></tr></thead>
+          <tbody>
+          {% for row in history[:80] %}
+            <tr>
+              <td>{{ row.time }}</td>
+              <td>{{ row.action }}</td>
+              <td class="{% if row.status == 'success' %}ok{% else %}bad{% endif %}">{{ row.status }}</td>
+              <td><code>{{ row.detail }}</code></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="sub">실행 이력이 없습니다.</div>
+      {% endif %}
+    </div>
+    <div class="card">
+      <h2>오늘 판단 로그</h2>
+      {% if today_actions %}
+        <table>
+          <thead><tr><th>로그</th></tr></thead>
+          <tbody>
+          {% for line in today_actions[:80] %}
+            <tr><td><code>{{ line }}</code></td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="sub">오늘 기록된 판단 로그가 없습니다.</div>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

@@ -165,3 +165,26 @@ crontab -e
 # 매일 오전 9:00 - 일일 현황 보고
 0 9 * * 1-5 /home/ubuntu/auto_stock_machine/venv/bin/python /home/ubuntu/auto_stock_machine/main.py --mode status >> /home/ubuntu/auto_stock_machine/logs/cron.log 2>&1
 ```
+
+---
+
+## 7. 웹으로 환경 변수 관리 (선택)
+
+`.env` 에 아래 값을 추가합니다.
+
+```dotenv
+WEB_ADMIN_PASSWORD=원하는_로그인_비밀번호
+WEB_ADMIN_SESSION_SECRET=
+```
+
+웹 관리자 실행:
+
+```bash
+python web_admin.py
+```
+
+브라우저 접속:
+
+`http://127.0.0.1:5000`
+
+로그인 후 `IS_REAL_TRADING` 포함 주요 `.env` 값을 수정/저장할 수 있습니다.

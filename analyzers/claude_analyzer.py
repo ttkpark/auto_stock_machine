@@ -27,9 +27,11 @@ class ClaudeAnalyzer(BaseAnalyzer):
                 ".env 파일에 CLAUDE_API_KEY 가 설정되어 있지 않습니다."
             )
         self.client = anthropic.Anthropic(api_key=api_key)
+        self.last_recommendation_error = ""
         logger.info(f"[ClaudeAnalyzer] 초기화 완료 (모델: {MODEL_NAME})")
 
     def recommend_buy(self, balance: int, market_info: str = "") -> Optional[BuyRecommendation]:
+        self.last_recommendation_error = ""
         prompt = (
             f"당신은 한국 주식 전문가입니다.\n"
             f"내 주문 가능 예수금은 {balance:,}원입니다.\n"
@@ -49,6 +51,11 @@ class ClaudeAnalyzer(BaseAnalyzer):
             parsed = self._parse_json(raw_text)
             if not parsed:
                 logger.warning(f"[ClaudeAnalyzer] JSON 파싱 실패: {raw_text}")
+                self.last_recommendation_error = f"JSON 파싱 실패: {raw_text[:180]}"
+                return None
+
+            if not parsed.get("종목명", "").strip():
+                self.last_recommendation_error = "JSON에 종목명이 비어 있습니다."
                 return None
 
             return BuyRecommendation(
@@ -58,6 +65,7 @@ class ClaudeAnalyzer(BaseAnalyzer):
             )
         except Exception as e:
             logger.error(f"[ClaudeAnalyzer] 매수 추천 오류: {e}")
+            self.last_recommendation_error = f"API 오류: {e}"
             return None
 
     def decide_sell(

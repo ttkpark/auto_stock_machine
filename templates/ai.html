@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% set active_page = "ai" %}
+{% set title = "AI 상세" %}
+{% block content %}
+  <div class="card">
+    <h2>AI 판단 상세</h2>
+    <div class="sub">각 AI의 추천/판단/최종결정 과정을 실시간으로 확인합니다. (2초 주기 자동 갱신)</div>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+      <button id="btn-buy" class="btn btn-primary" type="button">매수 실행</button>
+      <button id="btn-sell" class="btn btn-primary" type="button">매도 실행</button>
+      <button id="btn-status" class="btn btn-gray" type="button">현황 실행</button>
+    </div>
+    <div id="run-state" class="sub" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="card">
+    <h2>실시간 이벤트</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>시간</th>
+          <th>모드</th>
+          <th>이벤트</th>
+          <th>상세</th>
+        </tr>
+      </thead>
+      <tbody id="trace-body">
+      {% for row in traces[::-1] %}
+        <tr>
+          <td>{{ row.time }}</td>
+          <td>{{ row.mode }}</td>
+          <td><code>{{ row.event_type }}</code></td>
+          <td><code>{{ row.payload }}</code></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    let activeRunId = "{{ state.run_id }}";
+
+    async function startAction(action) {
+      const body = new URLSearchParams();
+      body.set("action", action);
+
+      const resp = await fetch("/api/ai/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) {
+        alert(data.message || "실행 시작에 실패했습니다.");
+        return;
+      }
+      activeRunId = data.run_id;
+      await refreshState();
+    }
+
+    function formatPayload(payload) {
+      try {
+        return JSON.stringify(payload, null, 2);
+      } catch (e) {
+        return String(payload || "");
+      }
+    }
+
+    function renderState(state) {
+      const el = document.getElementById("run-state");
+      const runningText = state.running ? "실행 중" : "대기";
+      const mode = state.mode || "-";
+      const runId = state.run_id || "-";
+      const startedAt = state.started_at || "-";
+      const finishedAt = state.finished_at || "-";
+      el.textContent = `상태: ${runningText} | 모드: ${mode} | run_id: ${runId} | 시작: ${startedAt} | 종료: ${finishedAt}`;
+
+      const disabled = !!state.running;
+      document.getElementById("btn-buy").disabled = disabled;
+      document.getElementById("btn-sell").disabled = disabled;
+      document.getElementById("btn-status").disabled = disabled;
+    }
+
+    function renderTraces(traces) {
+      const body = document.getElementById("trace-body");
+      body.innerHTML = "";
+      const rows = traces.slice().reverse();
+      for (const row of rows) {
+        const tr = document.createElement("tr");
+
+        const tdTime = document.createElement("td");
+        tdTime.textContent = row.time || "";
+        tr.appendChild(tdTime);
+
+        const tdMode = document.createElement("td");
+        tdMode.textContent = row.mode || "";
+        tr.appendChild(tdMode);
+
+        const tdEvent = document.createElement("td");
+        const eventCode = document.createElement("code");
+        eventCode.textContent = row.event_type || "";
+        tdEvent.appendChild(eventCode);
+        tr.appendChild(tdEvent);
+
+        const tdPayload = document.createElement("td");
+        const payloadCode = document.createElement("code");
+        payloadCode.textContent = formatPayload(row.payload || {});
+        tdPayload.appendChild(payloadCode);
+        tr.appendChild(tdPayload);
+
+        body.appendChild(tr);
+      }
+    }
+
+    async function refreshState() {
+      const runQuery = activeRunId ? `?run_id=${encodeURIComponent(activeRunId)}` : "";
+      const resp = await fetch(`/api/ai/state${runQuery}`);
+      if (!resp.ok) {
+        return;
+      }
+      const data = await resp.json();
+      if (data.active_run_id) {
+        activeRunId = data.active_run_id;
+      }
+      renderState(data.state || {});
+      renderTraces(data.traces || []);
+    }
+
+    document.getElementById("btn-buy").addEventListener("click", () => startAction("buy"));
+    document.getElementById("btn-sell").addEventListener("click", () => startAction("sell"));
+    document.getElementById("btn-status").addEventListener("click", () => startAction("status"));
+
+    refreshState();
+    setInterval(refreshState, 2000);
+  </script>
+{% endblock %}

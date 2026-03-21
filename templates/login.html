@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Auto Stock 관리자 로그인</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f5f7fb; margin: 0; }
+    .container { max-width: 420px; margin: 120px auto; background: #fff; padding: 24px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+    h1 { margin-top: 0; font-size: 20px; }
+    label { display: block; margin-bottom: 8px; font-weight: bold; }
+    input { width: 100%; padding: 10px; border: 1px solid #d8deea; border-radius: 6px; box-sizing: border-box; }
+    button { margin-top: 14px; width: 100%; background: #1e66f5; color: white; border: none; padding: 10px; border-radius: 6px; cursor: pointer; }
+    .flash { padding: 10px; border-radius: 6px; margin-bottom: 12px; font-size: 14px; }
+    .error { background: #fde9ec; color: #a40020; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>환경변수 관리자 로그인</h1>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+    <form method="post" action="/login">
+      <label for="password">관리자 비밀번호</label>
+      <input id="password" name="password" type="password" required>
+      <button type="submit">로그인</button>
+    </form>
+  </div>
+</body>
+</html>

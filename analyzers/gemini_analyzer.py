@@ -16,7 +16,8 @@ from .base_analyzer import BaseAnalyzer, BuyRecommendation, SellDecision
 
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "gemini-1.5-flash"
+DEFAULT_MODEL_NAME = "gemini-2.0-flash"
+FALLBACK_MODEL_NAMES = ["gemini-2.5-flash", "gemini-flash-latest"]
 
 
 class GeminiAnalyzer(BaseAnalyzer):
@@ -27,10 +28,31 @@ class GeminiAnalyzer(BaseAnalyzer):
                 ".env 파일에 GEMINI_API_KEY 가 설정되어 있지 않습니다."
             )
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(MODEL_NAME)
-        logger.info(f"[GeminiAnalyzer] 초기화 완료 (모델: {MODEL_NAME})")
+        preferred_model = os.environ.get("GEMINI_MODEL_NAME", "").strip() or DEFAULT_MODEL_NAME
+        self.model_name = preferred_model
+        self.model = genai.GenerativeModel(preferred_model)
+        self.last_recommendation_error = ""
+        logger.info(f"[GeminiAnalyzer] 초기화 완료 (모델: {self.model_name})")
+
+    def _generate_content_with_fallback(self, prompt: str):
+        model_candidates = [self.model_name] + [
+            m for m in FALLBACK_MODEL_NAMES if m != self.model_name
+        ]
+        last_error = None
+        for idx, model_name in enumerate(model_candidates):
+            try:
+                if idx > 0:
+                    self.model_name = model_name
+                    self.model = genai.GenerativeModel(model_name)
+                    logger.warning(f"[GeminiAnalyzer] 모델 폴백 적용: {model_name}")
+                return self.model.generate_content(prompt)
+            except Exception as e:
+                last_error = e
+                logger.error(f"[GeminiAnalyzer] 모델 호출 실패 ({model_name}): {e}")
+        raise RuntimeError(f"Gemini 모델 호출 실패: {last_error}")
 
     def recommend_buy(self, balance: int, market_info: str = "") -> Optional[BuyRecommendation]:
+        self.last_recommendation_error = ""
         prompt = (
             f"당신은 한국 주식 전문가입니다.\n"
             f"내 주문 가능 예수금은 {balance:,}원입니다.\n"
@@ -41,11 +63,16 @@ class GeminiAnalyzer(BaseAnalyzer):
             f'{{"종목명": "삼성전자", "이유": "저평가 구간 진입"}}'
         )
         try:
-            response = self.model.generate_content(prompt)
+            response = self._generate_content_with_fallback(prompt)
             raw_text = response.text.strip()
             parsed = self._parse_json(raw_text)
             if not parsed:
                 logger.warning(f"[GeminiAnalyzer] JSON 파싱 실패: {raw_text}")
+                self.last_recommendation_error = f"JSON 파싱 실패: {raw_text[:180]}"
+                return None
+
+            if not parsed.get("종목명", "").strip():
+                self.last_recommendation_error = "JSON에 종목명이 비어 있습니다."
                 return None
 
             return BuyRecommendation(
@@ -55,6 +82,7 @@ class GeminiAnalyzer(BaseAnalyzer):
             )
         except Exception as e:
             logger.error(f"[GeminiAnalyzer] 매수 추천 오류: {e}")
+            self.last_recommendation_error = f"API 오류: {e}"
             return None
 
     def decide_sell(
@@ -76,7 +104,7 @@ class GeminiAnalyzer(BaseAnalyzer):
             f'\n"결정" 필드는 반드시 "매도" 또는 "보유" 중 하나여야 합니다.'
         )
         try:
-            response = self.model.generate_content(prompt)
+            response = self._generate_content_with_fallback(prompt)
             raw_text = response.text.strip()
             parsed = self._parse_json(raw_text)
             if not parsed:

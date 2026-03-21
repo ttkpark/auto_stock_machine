@@ -6,8 +6,11 @@ URL: https://openapivts.koreainvestment.com:29443
 실제 돈이 움직이지 않으므로, 개발 및 테스트 단계에서 사용하세요.
 """
 import os
+import json
+import time
 import requests
 import logging
+from pathlib import Path
 from typing import Optional
 from .base_broker import BaseBroker
 
@@ -16,12 +19,15 @@ logger = logging.getLogger(__name__)
 
 class MockBroker(BaseBroker):
     BASE_URL = "https://openapivts.koreainvestment.com:29443"
+    TOKEN_CACHE_FILE = Path("data/kis_mock_token.json")
 
     def __init__(self):
         self.app_key = os.environ.get("KIS_MOCK_APP_KEY", "")
         self.app_secret = os.environ.get("KIS_MOCK_APP_SECRET", "")
         self.account_number = os.environ.get("KIS_MOCK_ACCOUNT_NUMBER", "")
         self._access_token: Optional[str] = None
+        self.last_order_error: str = ""
+        self.TOKEN_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
 
         if not all([self.app_key, self.app_secret, self.account_number]):
             logger.warning(
@@ -33,8 +39,38 @@ class MockBroker(BaseBroker):
     # ------------------------------------------------------------------ #
     #  인증 토큰
     # ------------------------------------------------------------------ #
+    def _load_cached_token(self) -> Optional[str]:
+        if not self.TOKEN_CACHE_FILE.exists():
+            return None
+        try:
+            data = json.loads(self.TOKEN_CACHE_FILE.read_text(encoding="utf-8"))
+            token = str(data.get("access_token", "")).strip()
+            expires_at = int(data.get("expires_at", 0))
+            if token and expires_at > int(time.time()) + 30:
+                return token
+        except Exception:
+            return None
+        return None
+
+    def _save_cached_token(self, token: str, expires_in: int) -> None:
+        # KIS 토큰은 통상 수시간 유효. 안전 여유를 위해 60초 줄여 저장합니다.
+        safe_expires_at = int(time.time()) + max(0, int(expires_in) - 60)
+        payload = {
+            "access_token": token,
+            "expires_at": safe_expires_at,
+        }
+        self.TOKEN_CACHE_FILE.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
     def get_access_token(self) -> str:
         if self._access_token:
+            return self._access_token
+
+        cached = self._load_cached_token()
+        if cached:
+            self._access_token = cached
             return self._access_token
 
         url = f"{self.BASE_URL}/oauth2/tokenP"
@@ -45,7 +81,9 @@ class MockBroker(BaseBroker):
         }
         resp = requests.post(url, json=payload, timeout=10)
         resp.raise_for_status()
-        self._access_token = resp.json()["access_token"]
+        data = resp.json()
+        self._access_token = data["access_token"]
+        self._save_cached_token(self._access_token, int(data.get("expires_in", 21600)))
         logger.info("[MockBroker] 액세스 토큰 발급 성공.")
         return self._access_token
 
@@ -56,6 +94,19 @@ class MockBroker(BaseBroker):
             "appkey": self.app_key,
             "appsecret": self.app_secret,
         }
+
+    def _validate_response(self, data: dict, api_name: str) -> bool:
+        """
+        KIS 응답 공통 검증.
+        정상(rt_cd == "0")이 아니거나 에러 구조일 때 원인 로그를 남깁니다.
+        """
+        rt_cd = str(data.get("rt_cd", ""))
+        if rt_cd and rt_cd != "0":
+            logger.error(
+                f"[MockBroker] {api_name} 실패 (rt_cd={rt_cd}, msg_cd={data.get('msg_cd')}, msg1={data.get('msg1')})"
+            )
+            return False
+        return True
 
     # ------------------------------------------------------------------ #
     #  계좌 정보
@@ -80,7 +131,20 @@ class MockBroker(BaseBroker):
         resp = requests.get(url, headers=headers, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
-        balance = int(data["output"]["ord_psbl_cash"])
+        if not self._validate_response(data, "주문 가능 예수금 조회"):
+            return 0
+
+        output = data.get("output")
+        if not isinstance(output, dict):
+            logger.error(f"[MockBroker] 주문 가능 예수금 조회 응답 형식 오류: output 누락 | raw={data}")
+            return 0
+
+        ord_psbl_cash = output.get("ord_psbl_cash")
+        if ord_psbl_cash is None:
+            logger.error(f"[MockBroker] 주문 가능 예수금 조회 응답 오류: ord_psbl_cash 누락 | raw={data}")
+            return 0
+
+        balance = int(ord_psbl_cash)
         logger.info(f"[MockBroker] 주문 가능 예수금: {balance:,}원")
         return balance
 
@@ -108,6 +172,8 @@ class MockBroker(BaseBroker):
         resp = requests.get(url, headers=headers, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
+        if not self._validate_response(data, "잔고 조회"):
+            return []
 
         holdings = []
         for item in data.get("output1", []):
@@ -133,7 +199,16 @@ class MockBroker(BaseBroker):
         try:
             resp = requests.get(url, headers=headers, params=params, timeout=10)
             resp.raise_for_status()
-            price = int(resp.json()["output"]["stck_prpr"])
+            data = resp.json()
+            if not self._validate_response(data, "현재가 조회"):
+                return None
+
+            output = data.get("output")
+            if not isinstance(output, dict) or output.get("stck_prpr") is None:
+                logger.error(f"[MockBroker] 현재가 조회 응답 형식 오류 ({ticker}) | raw={data}")
+                return None
+
+            price = int(output["stck_prpr"])
             return price
         except Exception as e:
             logger.error(f"[MockBroker] 현재가 조회 실패 ({ticker}): {e}")
@@ -163,12 +238,15 @@ class MockBroker(BaseBroker):
             resp.raise_for_status()
             result = resp.json()
             if result.get("rt_cd") == "0":
+                self.last_order_error = ""
                 logger.info(f"[MockBroker] 매수 성공: {ticker} {qty}주")
                 return True
             else:
-                logger.error(f"[MockBroker] 매수 실패: {result.get('msg1')}")
+                self.last_order_error = str(result.get("msg1", "원인 미상"))
+                logger.error(f"[MockBroker] 매수 실패: {self.last_order_error}")
                 return False
         except Exception as e:
+            self.last_order_error = str(e)
             logger.error(f"[MockBroker] 매수 주문 오류 ({ticker}): {e}")
             return False
 

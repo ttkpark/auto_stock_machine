@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% set active_page = "settings" %}
+{% set title = "환경설정" %}
+{% block content %}
+  <div class="card">
+    <h2>환경 변수 설정</h2>
+    <div class="sub">저장하면 <code>.env</code> 파일이 갱신됩니다. 실행 중 프로세스에는 즉시 반영되지 않을 수 있습니다.</div>
+    <form method="post" action="/settings/save" style="margin-top: 10px;">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 25%;">키</th>
+            <th style="width: 55%;">값</th>
+            <th style="width: 20%;">현재(마스킹)</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for key in managed_keys %}
+          <tr>
+            <td><strong>{{ key }}</strong></td>
+            <td>
+              {% if key == "IS_REAL_TRADING" %}
+                <select name="{{ key }}">
+                  <option value="False" {% if values[key] == "False" %}selected{% endif %}>False (모의투자)</option>
+                  <option value="True" {% if values[key] == "True" %}selected{% endif %}>True (실전투자)</option>
+                </select>
+              {% else %}
+                <input type="text" name="{{ key }}" value="{{ values[key] }}" style="width:100%;padding:8px;border:1px solid #d8deea;border-radius:6px;">
+              {% endif %}
+            </td>
+            <td>{{ masked_values[key] }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <div style="margin-top:12px;">
+        <button class="btn btn-primary" type="submit">저장</button>
+      </div>
+    </form>
+  </div>
+{% endblock %}

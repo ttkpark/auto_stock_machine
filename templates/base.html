@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ title or "Auto Stock Dashboard" }}</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f5f7fb; margin: 0; color: #222; }
+    .wrap { max-width: 1200px; margin: 20px auto; padding: 0 14px; }
+    .card { background: #fff; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); padding: 16px; margin-bottom: 14px; }
+    .top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .nav { display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav a { text-decoration: none; padding: 8px 12px; border-radius: 6px; background: #eef3ff; color: #26419a; font-weight: 700; }
+    .nav a.active { background: #1e66f5; color: #fff; }
+    h1 { margin: 6px 0 0; font-size: 24px; }
+    h2 { margin: 0 0 10px; font-size: 18px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .kpi { font-size: 24px; font-weight: 700; margin-top: 6px; }
+    .sub { color: #5a6474; font-size: 13px; }
+    .ok { color: #0a7f39; font-weight: 700; }
+    .bad { color: #b1002b; font-weight: 700; }
+    .btn { border: none; padding: 9px 12px; border-radius: 6px; cursor: pointer; font-weight: 700; }
+    .btn-primary { background: #1e66f5; color: #fff; }
+    .btn-danger { background: #d53f3f; color: #fff; }
+    .btn-gray { background: #5b6472; color: #fff; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid #edf1f7; padding: 8px; text-align: left; font-size: 14px; vertical-align: top; }
+    th { background: #f9fbff; }
+    .flash { padding: 10px; border-radius: 6px; margin: 0 0 10px; font-size: 14px; }
+    .success { background: #e8f8ee; color: #0a6b2d; }
+    .error { background: #fde9ec; color: #a40020; }
+    code { background: #f2f4f9; border-radius: 4px; padding: 2px 4px; }
+    @media (max-width: 980px) {
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="top">
+        <div>
+          <h1>Auto Stock Dashboard</h1>
+          <div class="sub">자동매매 상태/설정/실행을 웹에서 통합 관리</div>
+        </div>
+        <div><a href="/logout">로그아웃</a></div>
+      </div>
+      <div class="nav" style="margin-top: 12px;">
+        <a class="{% if active_page == 'dashboard' %}active{% endif %}" href="/">대시보드</a>
+        <a class="{% if active_page == 'settings' %}active{% endif %}" href="/settings">환경설정</a>
+        <a class="{% if active_page == 'actions' %}active{% endif %}" href="/actions">액션실행</a>
+        <a class="{% if active_page == 'ai' %}active{% endif %}" href="/ai">AI 상세</a>
+        <a class="{% if active_page == 'server' %}active{% endif %}" href="/server">서버상태</a>
+      </div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </div>
+</body>
+</html>

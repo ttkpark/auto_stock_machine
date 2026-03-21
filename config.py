@@ -24,8 +24,11 @@ IS_REAL_TRADING: bool = os.environ.get("IS_REAL_TRADING", "False").lower() == "t
 # 매수 시 사용할 예수금 비율 (0.9 = 90%)
 BUY_BUDGET_RATIO: float = 0.9
 
-# 최소 AI 합의 수 (3개 AI 중 2개 이상 동의 시 매수)
-MIN_AI_CONSENSUS: int = 2
+# 최소 AI 합의 수 (추천 1개 이상이면 매수 후보 인정)
+MIN_AI_CONSENSUS: int = 1
+
+# 1회 매수 실행에서 최대 매수 종목 수
+MAX_BUY_STOCKS: int = 3
 
 # 자동 매도 조건
 TAKE_PROFIT_RATE: float = 5.0    # 수익률 +5% 이상이면 AI에게 매도 판단 요청

@@ -52,6 +52,35 @@ class DecisionMaker:
         )
         return None
 
+    def find_buy_consensus_candidates(
+        self,
+        recommendations: list[Optional[BuyRecommendation]],
+        max_stocks: int = 1,
+    ) -> list[str]:
+        """
+        합의 기준(min_consensus)을 넘는 종목들을 득표순으로 반환합니다.
+        """
+        valid = [r for r in recommendations if r is not None and r.stock_name]
+        if not valid:
+            logger.info("[DecisionMaker] 유효한 매수 추천이 없습니다.")
+            return []
+
+        name_counter = Counter(r.stock_name for r in valid)
+        logger.info(f"[DecisionMaker] AI 추천 집계: {dict(name_counter)}")
+
+        agreed = [name for name, count in name_counter.most_common() if count >= self.min_consensus]
+        if not agreed:
+            top_stock, top_count = name_counter.most_common(1)[0]
+            logger.info(
+                f"[DecisionMaker] 합의 실패. 최다 추천: '{top_stock}' ({top_count}표) "
+                f"- 최소 {self.min_consensus}표 필요."
+            )
+            return []
+
+        limited = agreed[: max(1, max_stocks)]
+        logger.info(f"[DecisionMaker] 합의 종목 목록: {limited}")
+        return limited
+
     def decide_sell_by_vote(self, decisions: list[SellDecision]) -> SellDecision:
         """
         AI 판단 목록에서 다수결로 매도/보유를 결정합니다.

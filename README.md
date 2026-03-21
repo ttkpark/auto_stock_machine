@@ -7,6 +7,38 @@
 
 ---
 
+## 우분투 서버 원라인 설치
+
+아래 명령 하나로 우분투 서버에 설치할 수 있습니다.
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/auto_stock_machine/main/install_ubuntu.sh) \
+  --repo-url https://github.com/YOUR_USERNAME/auto_stock_machine.git
+```
+
+설치 스크립트가 자동으로 수행하는 작업:
+
+- `git`, `python3`, `python3-venv`, `python3-pip` 설치
+- 프로젝트 클론/업데이트 (`~/auto_stock_machine`)
+- 가상환경 생성 (`.venv`) 및 `requirements.txt` 설치
+- `.env.example` 기반 `.env` 생성(기존 `.env`가 있으면 유지)
+- `logs/`, `data/` 런타임 디렉터리 생성
+
+설치 후 필수 작업:
+
+```bash
+cd ~/auto_stock_machine
+nano .env
+```
+
+`.env` 에 실제 API 키를 입력한 뒤 아래 명령으로 연동을 확인하세요.
+
+```bash
+~/auto_stock_machine/.venv/bin/python ~/auto_stock_machine/main.py --mode status
+```
+
+---
+
 ## 주요 기능
 
 - **다중 AI 교차 검증**: Gemini, Claude 등 복수의 AI가 동의한 종목만 매수
@@ -67,6 +99,8 @@ source venv/bin/activate   # 우분투
 pip install -r requirements.txt
 ```
 
+> 우분투 서버에서 빠르게 설치하려면 위 수동 절차 대신 `우분투 서버 원라인 설치` 섹션을 사용하세요.
+
 ### 2단계: API 키 설정
 
 ```bash
@@ -92,6 +126,23 @@ python main.py --mode status
 ```
 
 텔레그램으로 계좌 현황 메시지가 수신되면 연동 성공입니다.
+
+### (선택) 웹에서 .env 설정 관리
+
+`.env` 에 `WEB_ADMIN_PASSWORD`를 설정한 뒤, 아래 명령으로 웹 관리 페이지를 실행할 수 있습니다.
+
+```bash
+python web_admin.py
+```
+
+브라우저에서 `http://127.0.0.1:5000` 접속 후 로그인하면  
+아래 기능을 한 번에 사용할 수 있습니다.
+
+- 대시보드: 현재 투자 모드, 예수금, 보유 종목, 수익률, 오늘의 판단 로그
+- 모드 전환: `IS_REAL_TRADING` 모의/실전 스위칭
+- 환경설정: 주요 `.env` 변수 수정/저장
+- 액션실행: `buy/sell/status` 수동 실행
+- 서버상태: 파이썬 버전, 업타임, 로그 갱신 시각 확인
 
 ### 4단계: 매매 로직 테스트 (모의투자)
 

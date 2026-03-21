@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% set active_page = "dashboard" %}
+{% set title = "대시보드" %}
+{% block content %}
+  <div class="grid-3">
+    <div class="card">
+      <h2>투자 모드</h2>
+      <div class="kpi {% if trading_mode == '실전투자' %}bad{% else %}ok{% endif %}">{{ trading_mode }}</div>
+      <div class="sub">실행 전 반드시 모드를 확인하세요.</div>
+      <form method="post" action="/toggle-trading" style="margin-top:10px;">
+        <button class="btn {% if trading_mode == '실전투자' %}btn-danger{% else %}btn-primary{% endif %}" type="submit">
+          모드 전환
+        </button>
+      </form>
+    </div>
+    <div class="card">
+      <h2>주문 가능 예수금</h2>
+      {% if broker_data.ok %}
+        <div class="kpi">{{ format_won(broker_data.balance) }}</div>
+      {% else %}
+        <div class="kpi bad">조회 실패</div>
+      {% endif %}
+      <div class="sub">{{ broker_data.error if not broker_data.ok else "브로커 API 조회 기준" }}</div>
+    </div>
+    <div class="card">
+      <h2>총 평가손익</h2>
+      {% if broker_data.ok %}
+        <div class="kpi {% if broker_data.total_profit_amount >= 0 %}ok{% else %}bad{% endif %}">
+          {{ format_won(broker_data.total_profit_amount) }}
+        </div>
+        <div class="sub">총 평가금액: {{ format_won(broker_data.total_eval_amount) }}</div>
+      {% else %}
+        <div class="kpi bad">조회 실패</div>
+        <div class="sub">브로커 인증/계좌 설정 확인 필요</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h2>보유 종목 현황</h2>
+      {% if broker_data.ok and broker_data.holdings %}
+        <table>
+          <thead>
+            <tr>
+              <th>종목</th>
+              <th>수량</th>
+              <th>평단가</th>
+              <th>현재가</th>
+              <th>수익률</th>
+              <th>평가손익</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for h in broker_data.holdings %}
+            <tr>
+              <td>{{ h.name }} ({{ h.ticker }})</td>
+              <td>{{ h.qty }}주</td>
+              <td>{{ format_won(h.avg_price) }}</td>
+              <td>{{ format_won(h.current_price) }}</td>
+              <td class="{% if h.profit_rate >= 0 %}ok{% else %}bad{% endif %}">
+                {{ "%0.2f"|format(h.profit_rate) }}%
+              </td>
+              <td class="{% if h.profit_amount >= 0 %}ok{% else %}bad{% endif %}">
+                {{ format_won(h.profit_amount) }}
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      {% elif broker_data.ok %}
+        <div class="sub">보유 종목이 없습니다.</div>
+      {% else %}
+        <div class="sub bad">{{ broker_data.error }}</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>오늘의 판단(액션) 리스트</h2>
+      {% if today_actions %}
+        <table>
+          <thead><tr><th>로그</th></tr></thead>
+          <tbody>
+          {% for line in today_actions[::-1][:25] %}
+            <tr><td><code>{{ line }}</code></td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="sub">오늘 기록된 판단 로그가 없습니다.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>최근 웹 실행 이력</h2>
+    {% if recent_history %}
+      <table>
+        <thead>
+          <tr><th>시간</th><th>액션</th><th>상태</th><th>상세</th></tr>
+        </thead>
+        <tbody>
+        {% for row in recent_history %}
+          <tr>
+            <td>{{ row.time }}</td>
+            <td>{{ row.action }}</td>
+            <td class="{% if row.status == 'success' %}ok{% else %}bad{% endif %}">{{ row.status }}</td>
+            <td><code>{{ row.detail }}</code></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="sub">웹에서 실행한 액션 이력이 없습니다.</div>
+    {% endif %}
+  </div>
+{% endblock %}
