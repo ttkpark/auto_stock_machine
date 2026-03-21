@@ -1,0 +1,20 @@
+# HTTP 통신 (한국투자증권 API)
+requests>=2.31.0
+
+# 환경 변수 관리 (.env 파일 로드)
+python-dotenv>=1.0.0
+
+# Google Gemini AI
+google-generativeai>=0.7.0
+
+# Anthropic Claude AI
+anthropic>=0.34.0
+
+# 텔레그램 봇
+python-telegram-bot>=21.0
+
+# KRX 주식 데이터 (환각 방지용 종목 목록)
+finance-datareader>=0.9.50
+
+# 데이터 처리 (FinanceDataReader 의존성)
+pandas>=2.0.0
