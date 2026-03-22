@@ -81,3 +81,6 @@
 {"time": "2026-03-21 14:59:52", "run_id": "589a763179eb", "mode": "buy", "trading_mode": "모의투자", "event_type": "buy_order_result", "payload": {"success": false, "stock_name": "삼성전자", "ticker": "005930", "qty": 44, "current_price": 199400, "ai_models": ["Gemini"], "reasons": ["AI 반도체 시장 점유율 확대 및 실적 턴어라운드 기대"], "broker_error": "모의투자 영업일이 아닙니다."}}
 {"time": "2026-03-21 14:59:52", "run_id": "589a763179eb", "mode": "buy", "trading_mode": "모의투자", "event_type": "buy_summary", "payload": {"target_count": 1, "bought_count": 0}}
 {"time": "2026-03-21 14:59:52", "run_id": "589a763179eb", "mode": "buy", "trading_mode": "모의투자", "event_type": "run_end", "payload": {"status": "success"}}
+{"time": "2026-03-21 16:18:20", "run_id": "737541aea14f", "mode": "status", "trading_mode": "모의투자", "event_type": "run_start", "payload": {}}
+{"time": "2026-03-21 16:18:28", "run_id": "737541aea14f", "mode": "status", "trading_mode": "모의투자", "event_type": "status_report", "payload": {"balance": 9950000, "holdings_count": 0}}
+{"time": "2026-03-21 16:18:28", "run_id": "737541aea14f", "mode": "status", "trading_mode": "모의투자", "event_type": "run_end", "payload": {"status": "success"}}

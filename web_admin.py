@@ -5,7 +5,7 @@
     python web_admin.py
 
 접속:
-    http://127.0.0.1:5000
+    http://127.0.0.1:8004 (또는 LAN의 http://<이_PC_IP>:8004)
 """
 import json
 import os
@@ -19,6 +19,7 @@ from datetime import datetime
 from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, List
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
@@ -28,9 +29,16 @@ from bot_service import execute_mode
 
 BASE_DIR = Path(__file__).parent
 ENV_PATH = BASE_DIR / ".env"
+
+# Flask 기본 리슨 (외부에서 접속하려면 0.0.0.0)
+DEFAULT_WEB_HOST = "0.0.0.0"
+DEFAULT_WEB_PORT = 8004
+_RUNTIME_LISTEN: tuple[str, int] = (DEFAULT_WEB_HOST, DEFAULT_WEB_PORT)
 LOG_PATH = BASE_DIR / "logs" / "bot.log"
 ACTION_HISTORY_PATH = BASE_DIR / "data" / "web_actions.json"
 AI_TRACE_PATH = BASE_DIR / "data" / "ai_traces.jsonl"
+SCHEDULE_CONFIG_PATH = BASE_DIR / "data" / "web_schedule.json"
+PROMPTS_PATH = BASE_DIR / "data" / "prompts.json"
 APP_STARTED_AT = time.time()
 AI_RUN_LOCK = threading.Lock()
 AI_RUN_STATE: Dict[str, Any] = {
@@ -41,6 +49,38 @@ AI_RUN_STATE: Dict[str, Any] = {
     "finished_at": "",
     "last_result": None,
 }
+SCHEDULER_STATE_LOCK = threading.Lock()
+SCHEDULER_STATE: Dict[str, Any] = {
+    "running": False,
+    "last_tick": "",
+    "last_message": "",
+    "last_triggered": {"buy": "", "sell": ""},
+}
+_SCHEDULER_STARTED = False
+
+# AI 엔진별 선택 가능한 모델 목록
+MODEL_OPTIONS: Dict[str, List[str]] = {
+    "GEMINI_MODEL_NAME": [
+        "gemini-2.0-flash",
+        "gemini-2.5-flash-preview-05-20",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+    ],
+    "CLAUDE_MODEL_NAME": [
+        "claude-3-5-haiku-latest",
+        "claude-3-7-sonnet-latest",
+        "claude-3-7-sonnet-20250219",
+        "claude-3-5-sonnet-latest",
+        "claude-3-opus-latest",
+    ],
+    "OPENAI_MODEL_NAME": [
+        "gpt-4o-mini",
+        "gpt-4o",
+        "gpt-4.1-mini",
+        "gpt-4.1",
+        "gpt-4-turbo",
+    ],
+}
 
 # 웹에서 관리할 환경 변수 목록
 MANAGED_KEYS: List[str] = [
@@ -50,7 +90,11 @@ MANAGED_KEYS: List[str] = [
     "TAKE_PROFIT_RATE",
     "STOP_LOSS_RATE",
     "GEMINI_API_KEY",
+    "GEMINI_MODEL_NAME",
     "CLAUDE_API_KEY",
+    "CLAUDE_MODEL_NAME",
+    "OPENAI_API_KEY",
+    "OPENAI_MODEL_NAME",
     "KIS_MOCK_APP_KEY",
     "KIS_MOCK_APP_SECRET",
     "KIS_MOCK_ACCOUNT_NUMBER",
@@ -305,8 +349,9 @@ def _server_status_snapshot() -> Dict[str, Any]:
     log_mtime = "-"
     if LOG_PATH.exists():
         log_mtime = datetime.fromtimestamp(LOG_PATH.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+    h, p = _RUNTIME_LISTEN
     return {
-        "host": "127.0.0.1:5000",
+        "host": f"{h}:{p}",
         "python": sys.version.split()[0],
         "platform": f"{platform.system()} {platform.release()}",
         "cwd": str(BASE_DIR),
@@ -320,10 +365,203 @@ def _read_bool_env(key: str, default: bool = False) -> bool:
     return os.environ.get(key, str(default)).lower() == "true"
 
 
+def _split_time_tokens(raw: str) -> List[str]:
+    normalized = raw.replace(";", ",").replace("\n", ",")
+    return [t.strip() for t in normalized.split(",") if t.strip()]
+
+
+def _normalize_hhmm_list(raw: str) -> List[str]:
+    tokens = _split_time_tokens(raw)
+    if not tokens:
+        return []
+    validated: List[str] = []
+    for token in tokens:
+        parts = token.split(":")
+        if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
+            raise ValueError(f"시간 형식 오류: {token} (예: 09:05)")
+        hh = int(parts[0])
+        mm = int(parts[1])
+        if not (0 <= hh <= 23 and 0 <= mm <= 59):
+            raise ValueError(f"시간 범위 오류: {token}")
+        validated.append(f"{hh:02d}:{mm:02d}")
+    return sorted(set(validated))
+
+
+def _normalize_weekdays(raw: str) -> str:
+    token = raw.strip().replace(" ", "")
+    if not token:
+        raise ValueError("요일은 비워둘 수 없습니다. 예: 1-5")
+    allowed = set("1234567,-")
+    if any(ch not in allowed for ch in token):
+        raise ValueError("요일 형식이 올바르지 않습니다. 예: 1-5 또는 1,2,3,4,5")
+    return token
+
+
+def _default_schedule_config() -> Dict[str, Any]:
+    return {
+        "enabled": False,
+        "weekdays": "1-5",
+        "timezone": "Asia/Seoul",
+        "buy_times": ["09:05", "11:05", "13:05", "15:05"],
+        "sell_times": ["09:35", "11:35", "13:35", "15:25"],
+    }
+
+
+def _load_schedule_config() -> Dict[str, Any]:
+    cfg = _default_schedule_config()
+    if not SCHEDULE_CONFIG_PATH.exists():
+        return cfg
+    try:
+        loaded = json.loads(SCHEDULE_CONFIG_PATH.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            cfg.update(loaded)
+    except Exception:
+        return cfg
+    return cfg
+
+
+def _save_schedule_config(
+    enabled: bool,
+    weekdays: str,
+    timezone_name: str,
+    buy_times: List[str],
+    sell_times: List[str],
+) -> None:
+    if not timezone_name.strip():
+        raise ValueError("타임존은 비워둘 수 없습니다. 예: Asia/Seoul")
+    validated_weekdays = _normalize_weekdays(weekdays)
+    config = {
+        "enabled": bool(enabled),
+        "weekdays": validated_weekdays,
+        "timezone": timezone_name.strip(),
+        "buy_times": buy_times,
+        "sell_times": sell_times,
+    }
+    SCHEDULE_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SCHEDULE_CONFIG_PATH.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _current_time_in_timezone(timezone_name: str) -> datetime:
+    try:
+        return datetime.now(ZoneInfo(timezone_name))
+    except Exception:
+        return datetime.now()
+
+
+def _time_due(now: datetime, weekdays: str, hhmm_list: List[str]) -> bool:
+    weekday_token = str(now.isoweekday())
+    allowed_days: List[str] = []
+    for chunk in weekdays.split(","):
+        part = chunk.strip()
+        if not part:
+            continue
+        if "-" in part:
+            left, right = part.split("-", 1)
+            if left.isdigit() and right.isdigit():
+                start = int(left)
+                end = int(right)
+                if 1 <= start <= end <= 7:
+                    allowed_days.extend([str(d) for d in range(start, end + 1)])
+            continue
+        if part.isdigit() and 1 <= int(part) <= 7:
+            allowed_days.append(part)
+    if weekday_token not in set(allowed_days):
+        return False
+    return now.strftime("%H:%M") in set(hhmm_list)
+
+
+def _run_scheduled_mode(mode: str, timezone_name: str, triggered_at: datetime) -> None:
+    with AI_RUN_LOCK:
+        if AI_RUN_STATE["running"]:
+            _append_action_history(mode, "skipped", f"[scheduler] {mode} 스킵: 이미 실행 중")
+            return
+
+    run_id = uuid.uuid4().hex[:12]
+    _append_action_history(
+        mode,
+        "queued",
+        f"[scheduler] {timezone_name} {triggered_at.strftime('%Y-%m-%d %H:%M')} 트리거 (run_id={run_id})",
+    )
+    thread = threading.Thread(target=_run_ai_action_in_background, args=(mode, run_id), daemon=True)
+    thread.start()
+
+
+def _scheduler_loop() -> None:
+    fired_keys: set[str] = set()
+    while True:
+        try:
+            config = _load_schedule_config()
+            now = _current_time_in_timezone(str(config.get("timezone", "Asia/Seoul")))
+            enabled = bool(config.get("enabled", False))
+            weekdays = str(config.get("weekdays", "1-5"))
+            buy_times = [str(v) for v in config.get("buy_times", [])]
+            sell_times = [str(v) for v in config.get("sell_times", [])]
+
+            with SCHEDULER_STATE_LOCK:
+                SCHEDULER_STATE["running"] = True
+                SCHEDULER_STATE["last_tick"] = now.strftime("%Y-%m-%d %H:%M:%S")
+                SCHEDULER_STATE["last_message"] = "활성" if enabled else "비활성"
+
+            if enabled:
+                due_modes: List[str] = []
+                if _time_due(now, weekdays, buy_times):
+                    due_modes.append("buy")
+                if _time_due(now, weekdays, sell_times):
+                    due_modes.append("sell")
+
+                for mode in due_modes:
+                    fire_key = f"{mode}:{now.strftime('%Y-%m-%d %H:%M')}"
+                    if fire_key in fired_keys:
+                        continue
+                    fired_keys.add(fire_key)
+                    if len(fired_keys) > 1000:
+                        fired_keys = set(list(fired_keys)[-400:])
+                    with SCHEDULER_STATE_LOCK:
+                        SCHEDULER_STATE["last_triggered"][mode] = now.strftime("%Y-%m-%d %H:%M:%S")
+                    _run_scheduled_mode(mode, str(config.get("timezone", "Asia/Seoul")), now)
+        except Exception as e:
+            with SCHEDULER_STATE_LOCK:
+                SCHEDULER_STATE["last_message"] = f"오류: {e}"
+        time.sleep(10)
+
+
+def _ensure_scheduler_started() -> None:
+    global _SCHEDULER_STARTED
+    if _SCHEDULER_STARTED:
+        return
+    _SCHEDULER_STARTED = True
+    thread = threading.Thread(target=_scheduler_loop, daemon=True)
+    thread.start()
+
+
+def _load_schedule_snapshot() -> Dict[str, Any]:
+    config = _load_schedule_config()
+    with SCHEDULER_STATE_LOCK:
+        state = {
+            "running": SCHEDULER_STATE.get("running", False),
+            "last_tick": SCHEDULER_STATE.get("last_tick", ""),
+            "last_message": SCHEDULER_STATE.get("last_message", ""),
+            "last_triggered": dict(SCHEDULER_STATE.get("last_triggered", {"buy": "", "sell": ""})),
+        }
+    now = _current_time_in_timezone(str(config.get("timezone", "Asia/Seoul")))
+    return {
+        "supported": True,
+        "enabled": bool(config.get("enabled", False)),
+        "weekdays": str(config.get("weekdays", "1-5")),
+        "timezone": str(config.get("timezone", "Asia/Seoul")),
+        "buy_times": [str(v) for v in config.get("buy_times", [])],
+        "sell_times": [str(v) for v in config.get("sell_times", [])],
+        "source": str(SCHEDULE_CONFIG_PATH),
+        "scheduler_state": state,
+        "now_in_timezone": now.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
     # 빈 문자열("")이 들어온 경우도 안전하게 랜덤 키를 사용합니다.
     app.config["SECRET_KEY"] = os.environ.get("WEB_ADMIN_SESSION_SECRET") or secrets.token_hex(24)
+    _ensure_scheduler_started()
 
     @app.get("/login")
     def login_page():
@@ -384,7 +622,7 @@ def create_app() -> Flask:
     def settings():
         values = _load_env_values()
         masked_values = {k: _mask_value(k, v) for k, v in values.items()}
-        return render_template("settings.html", values=values, masked_values=masked_values, managed_keys=MANAGED_KEYS)
+        return render_template("settings.html", values=values, masked_values=masked_values, managed_keys=MANAGED_KEYS, model_options=MODEL_OPTIONS)
 
     @app.post("/settings/save")
     @_login_required
@@ -477,11 +715,114 @@ def create_app() -> Flask:
         status = _server_status_snapshot()
         return render_template("server.html", status=status)
 
+    @app.get("/schedule")
+    @_login_required
+    def schedule():
+        try:
+            snapshot = _load_schedule_snapshot()
+        except Exception as e:
+            flash(f"스케줄 조회 실패: {e}", "error")
+            snapshot = {
+                "supported": True,
+                "enabled": False,
+                "weekdays": "1-5",
+                "timezone": "Asia/Seoul",
+                "buy_times": [],
+                "sell_times": [],
+                "source": "error",
+                "scheduler_state": {
+                    "running": False,
+                    "last_tick": "",
+                    "last_message": "오류",
+                    "last_triggered": {"buy": "", "sell": ""},
+                },
+                "now_in_timezone": "",
+            }
+        return render_template("schedule.html", schedule=snapshot)
+
+    @app.post("/schedule/save")
+    @_login_required
+    def schedule_save():
+        enabled = request.form.get("enabled", "") == "on"
+        weekdays = request.form.get("weekdays", "1-5").strip()
+        timezone_name = request.form.get("timezone", "Asia/Seoul").strip()
+        buy_times_raw = request.form.get("buy_times", "").strip()
+        sell_times_raw = request.form.get("sell_times", "").strip()
+        try:
+            buy_times = _normalize_hhmm_list(buy_times_raw)
+            sell_times = _normalize_hhmm_list(sell_times_raw)
+            if enabled and (not buy_times or not sell_times):
+                raise ValueError("활성화 시 매수/매도 시간은 최소 1개 이상 필요합니다.")
+            _save_schedule_config(
+                enabled=enabled,
+                weekdays=weekdays,
+                timezone_name=timezone_name,
+                buy_times=buy_times,
+                sell_times=sell_times,
+            )
+            if enabled:
+                flash("스케줄을 저장했습니다. 웹 스케줄러가 즉시 반영합니다.", "success")
+            else:
+                flash("자동 스케줄을 비활성화했습니다.", "success")
+        except Exception as e:
+            flash(f"스케줄 저장 실패: {e}", "error")
+        return redirect(url_for("schedule"))
+
+    @app.get("/prompts")
+    @_login_required
+    def prompts_page():
+        from utils.prompt_manager import load_prompts, DEFAULT_BUY_TEMPLATE, DEFAULT_SELL_TEMPLATE, DEFAULT_BUDGET_TEMPLATE
+        current = load_prompts()
+        return render_template(
+            "prompts.html",
+            buy_template=current["buy"],
+            sell_template=current["sell"],
+            budget_template=current.get("budget", DEFAULT_BUDGET_TEMPLATE),
+            default_buy=DEFAULT_BUY_TEMPLATE,
+            default_sell=DEFAULT_SELL_TEMPLATE,
+            default_budget=DEFAULT_BUDGET_TEMPLATE,
+            prompts_path=str(PROMPTS_PATH),
+        )
+
+    @app.post("/prompts/save")
+    @_login_required
+    def prompts_save():
+        from utils.prompt_manager import save_prompts
+        buy_template = request.form.get("buy_template", "").strip()
+        sell_template = request.form.get("sell_template", "").strip()
+        budget_template = request.form.get("budget_template", "").strip()
+        if not buy_template or not sell_template or not budget_template:
+            flash("매수/매도/예산 프롬프트는 비워둘 수 없습니다.", "error")
+            return redirect(url_for("prompts_page"))
+        try:
+            save_prompts(buy_template, sell_template, budget_template)
+            flash("프롬프트가 저장되었습니다. 다음 AI 실행부터 반영됩니다.", "success")
+        except Exception as e:
+            flash(f"저장 실패: {e}", "error")
+        return redirect(url_for("prompts_page"))
+
+    @app.post("/prompts/reset")
+    @_login_required
+    def prompts_reset():
+        from utils.prompt_manager import reset_prompts
+        try:
+            reset_prompts()
+            flash("프롬프트를 기본값으로 초기화했습니다.", "success")
+        except Exception as e:
+            flash(f"초기화 실패: {e}", "error")
+        return redirect(url_for("prompts_page"))
+
     return app
 
 
-def run_web_admin(host: str = "127.0.0.1", port: int = 5000, debug: bool = False) -> None:
+def run_web_admin(
+    host: str = DEFAULT_WEB_HOST,
+    port: int = DEFAULT_WEB_PORT,
+    debug: bool = False,
+) -> None:
     """웹 관리자 서버를 실행합니다."""
+    global _RUNTIME_LISTEN
+    _RUNTIME_LISTEN = (host, port)
     load_dotenv(ENV_PATH, override=False)
     app = create_app()
     app.run(host=host, port=port, debug=debug)
