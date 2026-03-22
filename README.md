@@ -2,40 +2,8 @@
 
 다중 AI 교차 검증 기반 한국 주식 자동매매 봇
 
-여러 AI 모델(Gemini, Claude 등)의 다수결 합의를 통해 신뢰도 높은 종목을 발굴하고,  
-우분투 서버에서 24시간 무중단으로 텔레그램 알림과 함께 자동 매매를 수행합니다.
-
----
-
-## 우분투 서버 원라인 설치
-
-아래 명령 하나로 우분투 서버에 설치할 수 있습니다.
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/auto_stock_machine/main/install_ubuntu.sh) \
-  --repo-url https://github.com/YOUR_USERNAME/auto_stock_machine.git
-```
-
-설치 스크립트가 자동으로 수행하는 작업:
-
-- `git`, `python3`, `python3-venv`, `python3-pip` 설치
-- 프로젝트 클론/업데이트 (`~/auto_stock_machine`)
-- 가상환경 생성 (`.venv`) 및 `requirements.txt` 설치
-- `.env.example` 기반 `.env` 생성(기존 `.env`가 있으면 유지)
-- `logs/`, `data/` 런타임 디렉터리 생성
-
-설치 후 필수 작업:
-
-```bash
-cd ~/auto_stock_machine
-nano .env
-```
-
-`.env` 에 실제 API 키를 입력한 뒤 아래 명령으로 연동을 확인하세요.
-
-```bash
-~/auto_stock_machine/.venv/bin/python ~/auto_stock_machine/main.py --mode status
-```
+여러 AI 모델(Gemini, Claude 등)의 다수결 합의를 통해 신뢰도 높은 종목을 발굴하고,
+내장 스케줄러로 윈도우/리눅스 어디서든 24시간 무중단 텔레그램 알림과 함께 자동 매매를 수행합니다.
 
 ---
 
@@ -54,6 +22,7 @@ nano .env
 ```
 auto_stock_machine/
 ├── main.py                  메인 실행 파일
+├── scheduler.py             내장 스케줄러 (평일 자동 매매)
 ├── config.py                시스템 설정
 ├── requirements.txt
 ├── .env                     API 키 (직접 생성, Git 제외)
@@ -156,21 +125,21 @@ python main.py --mode sell
 
 > `.env` 파일의 `IS_REAL_TRADING=False` 상태에서는 모의투자 계좌로만 동작합니다.
 
-### 5단계: 우분투 crontab 자동화
+### 5단계: 자동매매 스케줄러 실행
 
 ```bash
-crontab -e
+python main.py --mode schedule
 ```
 
-```
-# 평일 오전 8:30 매수
-30 8 * * 1-5 /path/to/venv/bin/python /path/to/main.py --mode buy >> /path/to/logs/cron.log 2>&1
+내장 스케줄러가 평일에 자동으로 매수/매도/현황 보고를 실행합니다.
 
-# 평일 오후 3:00 매도
-0 15 * * 1-5 /path/to/venv/bin/python /path/to/main.py --mode sell >> /path/to/logs/cron.log 2>&1
-```
+| 작업 | 기본 시각 | 변경 방법 |
+|---|---|---|
+| 매수 | 08:30 | `config.py`의 `BUY_SCHEDULE` |
+| 매도 | 15:00 | `config.py`의 `SELL_SCHEDULE` |
+| 현황 보고 | 09:00 | `config.py`의 `STATUS_SCHEDULE` |
 
-자세한 crontab 설정은 **[docs/API_설정_가이드.md](docs/API_설정_가이드.md)** 를 참고하세요.
+윈도우/리눅스 모두 동일하게 동작하며, `Ctrl+C`로 종료할 수 있습니다.
 
 ---
 
@@ -213,6 +182,7 @@ IS_REAL_TRADING=True
 - **FinanceDataReader** - KRX 종목 데이터
 - **python-telegram-bot** - 텔레그램 알림
 - **requests** - 한국투자증권 REST API 통신
+- **schedule** - 내장 스케줄러 (crontab 대체)
 - **python-dotenv** - 환경 변수 관리
 
 ---

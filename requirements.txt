@@ -21,3 +21,6 @@ finance-datareader>=0.9.50
 
 # 데이터 처리 (FinanceDataReader 의존성)
 pandas>=2.0.0
+
+# 내장 스케줄러 (crontab 대체, 윈도우/리눅스 모두 지원)
+schedule>=1.2.0

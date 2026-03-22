@@ -145,26 +145,18 @@ IS_REAL_TRADING=False
 
 ---
 
-## 6. 우분투 crontab 자동 실행 설정
+## 6. 자동매매 스케줄러 실행
 
-모든 테스트가 완료된 후, 우분투에서 아래 명령으로 crontab을 설정합니다.
+모든 테스트가 완료된 후, 아래 명령으로 내장 스케줄러를 시작합니다.
 
 ```bash
-crontab -e
+python main.py --mode schedule
 ```
 
-아래 내용을 추가합니다 (경로는 실제 설치 경로로 변경):
+스케줄러가 평일에 자동으로 매수(08:30), 매도(15:00), 현황 보고(09:00)를 실행합니다.
+실행 시각은 `config.py`의 `BUY_SCHEDULE`, `SELL_SCHEDULE`, `STATUS_SCHEDULE`에서 변경할 수 있습니다.
 
-```
-# 평일(월-금) 오전 8:30 - 매수 로직
-30 8 * * 1-5 /home/ubuntu/auto_stock_machine/venv/bin/python /home/ubuntu/auto_stock_machine/main.py --mode buy >> /home/ubuntu/auto_stock_machine/logs/cron.log 2>&1
-
-# 평일(월-금) 오후 3:00 - 매도 로직
-0 15 * * 1-5 /home/ubuntu/auto_stock_machine/venv/bin/python /home/ubuntu/auto_stock_machine/main.py --mode sell >> /home/ubuntu/auto_stock_machine/logs/cron.log 2>&1
-
-# 매일 오전 9:00 - 일일 현황 보고
-0 9 * * 1-5 /home/ubuntu/auto_stock_machine/venv/bin/python /home/ubuntu/auto_stock_machine/main.py --mode status >> /home/ubuntu/auto_stock_machine/logs/cron.log 2>&1
-```
+윈도우/리눅스 모두 동일하게 동작하며, `Ctrl+C`로 종료합니다.
 
 ---
 
