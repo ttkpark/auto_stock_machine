@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    container_name: auto-stock-machine
+    restart: unless-stopped
+    ports:
+      - "8004:8004"
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data

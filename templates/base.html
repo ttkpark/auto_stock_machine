@@ -49,8 +49,10 @@
       <div class="nav" style="margin-top: 12px;">
         <a class="{% if active_page == 'dashboard' %}active{% endif %}" href="/">대시보드</a>
         <a class="{% if active_page == 'settings' %}active{% endif %}" href="/settings">환경설정</a>
+        <a class="{% if active_page == 'schedule' %}active{% endif %}" href="/schedule">타이밍설정</a>
         <a class="{% if active_page == 'actions' %}active{% endif %}" href="/actions">액션실행</a>
         <a class="{% if active_page == 'ai' %}active{% endif %}" href="/ai">AI 상세</a>
+        <a class="{% if active_page == 'prompts' %}active{% endif %}" href="/prompts">프롬프트</a>
         <a class="{% if active_page == 'server' %}active{% endif %}" href="/server">서버상태</a>
       </div>
     </div>

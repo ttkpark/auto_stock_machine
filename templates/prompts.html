@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% set active_page = "prompts" %}
+{% set title = "프롬프트 관리" %}
+{% block content %}
+<style>
+  .prompt-editor {
+    width: 100%; font-family: 'Courier New', monospace; font-size: 13px;
+    padding: 10px; border: 1px solid #d8deea; border-radius: 6px;
+    resize: vertical; line-height: 1.6; box-sizing: border-box;
+    background: #fafbff;
+  }
+  .prompt-editor:focus { border-color: #1e66f5; outline: none; background: #fff; }
+  .preview-box {
+    margin-top: 6px; background: #f0f4ff; border: 1px solid #c5d3f5;
+    border-radius: 6px; padding: 10px 12px; font-family: 'Courier New', monospace;
+    font-size: 12px; line-height: 1.7; white-space: pre-wrap; word-break: break-word;
+    color: #222; min-height: 36px;
+  }
+  .preview-box .pv-val {
+    background: #dbeafe; color: #1d4ed8; border-radius: 3px;
+    padding: 0 3px; font-weight: 600;
+  }
+  .preview-box .pv-unknown {
+    background: #fef3c7; color: #92400e; border-radius: 3px; padding: 0 3px;
+  }
+  .var-chip {
+    display: inline-block; background: #eef3ff; color: #26419a;
+    border-radius: 4px; padding: 2px 7px; font-size: 12px;
+    font-family: monospace; margin: 2px 2px; cursor: default;
+  }
+  .section-label { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
+  .hint { color: #5a6474; font-size: 12px; margin-bottom: 6px; }
+  .preview-label { font-size: 11px; color: #6b7a9a; margin-top: 6px; margin-bottom: 2px; font-weight: 600; letter-spacing: 0.04em; }
+  .editor-block { margin-bottom: 24px; }
+  .btn-row { display: flex; gap: 8px; margin-top: 14px; align-items: center; }
+  .diff-note { font-size: 12px; color: #888; }
+</style>
+
+<div class="card">
+  <h2>AI 프롬프트 관리</h2>
+  <div class="sub">
+    Gemini · Claude · ChatGPT 모두 아래 템플릿을 공유합니다.
+    저장 파일: <code>{{ prompts_path }}</code>
+  </div>
+
+  <form method="post" action="/prompts/save" style="margin-top: 16px;" id="prompt-form">
+
+    <!-- 예산 지침 프롬프트 -->
+    <div class="editor-block">
+      <div class="section-label">예산 지침 프롬프트</div>
+      <div class="hint">
+        매수 프롬프트 안에 <span class="var-chip">{budget_instruction}</span>으로 삽입됩니다.
+        사용 가능한 변수:
+        <span class="var-chip">{buy_budget_ratio}</span>
+        <span class="var-chip">{max_buy_stocks}</span>
+        — 값은 환경설정의 BUY_BUDGET_RATIO·MAX_BUY_STOCKS에서 읽어옵니다.
+      </div>
+      <textarea class="prompt-editor" name="budget_template" id="budget_template"
+        rows="3" data-prompt="budget">{{ budget_template }}</textarea>
+      <div class="preview-label">미리보기 (예시값 적용)</div>
+      <div class="preview-box" id="preview-budget"></div>
+    </div>
+
+    <!-- 매수 추천 프롬프트 -->
+    <div class="editor-block">
+      <div class="section-label">매수 추천 프롬프트</div>
+      <div class="hint">
+        사용 가능한 변수:
+        <span class="var-chip">{balance}</span>
+        <span class="var-chip">{budget_instruction}</span>
+        <span class="var-chip">{market_info_line}</span>
+      </div>
+      <textarea class="prompt-editor" name="buy_template" id="buy_template"
+        rows="10" data-prompt="buy">{{ buy_template }}</textarea>
+      <div class="preview-label">미리보기 (예시값 적용)</div>
+      <div class="preview-box" id="preview-buy"></div>
+    </div>
+
+    <!-- 매도/보유 판단 프롬프트 -->
+    <div class="editor-block">
+      <div class="section-label">매도/보유 판단 프롬프트</div>
+      <div class="hint">
+        사용 가능한 변수:
+        <span class="var-chip">{stock_name}</span>
+        <span class="var-chip">{ticker}</span>
+        <span class="var-chip">{qty}</span>
+        <span class="var-chip">{avg_price}</span>
+        <span class="var-chip">{current_price}</span>
+        <span class="var-chip">{profit_rate}</span>
+      </div>
+      <textarea class="prompt-editor" name="sell_template" id="sell_template"
+        rows="10" data-prompt="sell">{{ sell_template }}</textarea>
+      <div class="preview-label">미리보기 (예시값 적용)</div>
+      <div class="preview-box" id="preview-sell"></div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" type="submit">저장</button>
+      <span class="diff-note">저장 후 다음 AI 실행부터 반영됩니다.</span>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>기본값으로 초기화</h2>
+  <div class="sub" style="margin-bottom: 12px;">현재 편집 내용을 버리고 코드 내장 기본값으로 되돌립니다.</div>
+  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px;">
+    <div>
+      <div class="section-label" style="font-size: 13px; color: #5a6474; margin-bottom: 4px;">예산 기본값</div>
+      <pre style="background:#f9fbff;border:1px solid #e4e9f5;border-radius:6px;padding:10px;font-size:12px;overflow-x:auto;white-space:pre-wrap;margin:0;">{{ default_budget }}</pre>
+    </div>
+    <div>
+      <div class="section-label" style="font-size: 13px; color: #5a6474; margin-bottom: 4px;">매수 기본값</div>
+      <pre style="background:#f9fbff;border:1px solid #e4e9f5;border-radius:6px;padding:10px;font-size:12px;overflow-x:auto;white-space:pre-wrap;margin:0;">{{ default_buy }}</pre>
+    </div>
+    <div>
+      <div class="section-label" style="font-size: 13px; color: #5a6474; margin-bottom: 4px;">매도 기본값</div>
+      <pre style="background:#f9fbff;border:1px solid #e4e9f5;border-radius:6px;padding:10px;font-size:12px;overflow-x:auto;white-space:pre-wrap;margin:0;">{{ default_sell }}</pre>
+    </div>
+  </div>
+  <form method="post" action="/prompts/reset"
+        onsubmit="return confirm('현재 프롬프트를 기본값으로 초기화하겠습니까?')">
+    <button class="btn btn-danger" type="submit">기본값으로 초기화</button>
+  </form>
+</div>
+
+<script>
+// 미리보기에 사용할 예시값
+const SAMPLE = {
+  // 예산 프롬프트 변수
+  buy_budget_ratio: '90',
+  max_buy_stocks: '3',
+  // 매수 프롬프트 변수
+  balance: '1,500,000',
+  budget_instruction: '예수금의 90%를 오늘 매수에 사용하며, 최대 3개 종목에 분산 투자합니다.',
+  market_info_line: '추가 시장 정보: KOSPI 0.5% 상승',
+  // 매도 프롬프트 변수
+  stock_name: '삼성전자',
+  ticker: '005930',
+  qty: '10',
+  avg_price: '75,000',
+  current_price: '78,500',
+  profit_rate: '4.7',
+};
+
+// {변수명} 패턴만 치환 (JSON 중괄호는 건드리지 않음)
+const PLACEHOLDER_RE = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
+
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function renderPreview(template) {
+  const html = escapeHtml(template).replace(
+    /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g,
+    (match, key) => {
+      if (key in SAMPLE) {
+        return `<span class="pv-val">${escapeHtml(SAMPLE[key])}</span>`;
+      }
+      return `<span class="pv-unknown">${escapeHtml(match)}</span>`;
+    }
+  );
+  return html;
+}
+
+function updatePreview(textareaId, previewId) {
+  const ta = document.getElementById(textareaId);
+  const pv = document.getElementById(previewId);
+  if (!ta || !pv) return;
+  pv.innerHTML = renderPreview(ta.value);
+}
+
+// 예산 프롬프트가 바뀌면 SAMPLE.budget_instruction 도 같이 갱신
+function syncBudgetInstruction() {
+  const ta = document.getElementById('budget_template');
+  if (!ta) return;
+  SAMPLE.budget_instruction = ta.value
+    .replace(PLACEHOLDER_RE, (_, key) => SAMPLE[key] !== undefined ? SAMPLE[key] : `{${key}}`);
+}
+
+let debounceTimer = null;
+function onInput(textareaId, previewId, isBudget) {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => {
+    if (isBudget) {
+      syncBudgetInstruction();
+      updatePreview('buy_template', 'preview-buy');
+    }
+    updatePreview(textareaId, previewId);
+  }, 120);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const map = [
+    ['budget_template', 'preview-budget', true],
+    ['buy_template',    'preview-buy',    false],
+    ['sell_template',   'preview-sell',   false],
+  ];
+  map.forEach(([tid, pid, isBudget]) => {
+    const ta = document.getElementById(tid);
+    if (ta) {
+      ta.addEventListener('input', () => onInput(tid, pid, isBudget));
+    }
+  });
+
+  // 초기 렌더링
+  syncBudgetInstruction();
+  map.forEach(([tid, pid]) => updatePreview(tid, pid));
+});
+</script>
+{% endblock %}

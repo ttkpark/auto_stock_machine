@@ -13,6 +13,9 @@ google-generativeai>=0.7.0
 # Anthropic Claude AI
 anthropic>=0.34.0
 
+# OpenAI ChatGPT AI
+openai>=1.0.0
+
 # 텔레그램 봇
 python-telegram-bot>=21.0
 

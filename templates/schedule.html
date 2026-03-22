@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% set active_page = "schedule" %}
+{% set title = "타이밍설정" %}
+{% block content %}
+  <div class="card">
+    <h2>자동 실행 타이밍 설정 (웹 내장 스케줄러)</h2>
+    <div class="sub">OS와 무관하게 웹 프로세스가 직접 시간 체크 후 실행합니다.</div>
+    <form method="post" action="/schedule/save" style="margin-top: 12px;">
+      <table>
+        <tbody>
+          <tr>
+            <th style="width: 220px;">자동 스케줄 활성화</th>
+            <td>
+              <label>
+                <input type="checkbox" name="enabled" {% if schedule.enabled %}checked{% endif %}>
+                매수/매도 스케줄 자동 실행
+              </label>
+            </td>
+          </tr>
+          <tr>
+            <th>요일</th>
+            <td>
+              <input
+                type="text"
+                name="weekdays"
+                value="{{ schedule.weekdays }}"
+                style="width:100%;padding:8px;border:1px solid #d8deea;border-radius:6px;"
+              >
+              <div class="sub">예: <code>1-5</code>(월~금), <code>1,2,3,4,5</code></div>
+            </td>
+          </tr>
+          <tr>
+            <th>기준 타임존</th>
+            <td>
+              <input
+                type="text"
+                name="timezone"
+                value="{{ schedule.timezone }}"
+                style="width:100%;padding:8px;border:1px solid #d8deea;border-radius:6px;"
+              >
+              <div class="sub">권장: <code>Asia/Seoul</code>. 현재 해당 타임존 시각: <code>{{ schedule.now_in_timezone }}</code></div>
+            </td>
+          </tr>
+          <tr>
+            <th>매수 시간 목록</th>
+            <td>
+              <input
+                type="text"
+                name="buy_times"
+                value="{{ schedule.buy_times|join(',') }}"
+                style="width:100%;padding:8px;border:1px solid #d8deea;border-radius:6px;"
+              >
+              <div class="sub">쉼표(,)로 구분. 예: <code>09:05,11:05,13:05,15:05</code></div>
+            </td>
+          </tr>
+          <tr>
+            <th>매도 시간 목록</th>
+            <td>
+              <input
+                type="text"
+                name="sell_times"
+                value="{{ schedule.sell_times|join(',') }}"
+                style="width:100%;padding:8px;border:1px solid #d8deea;border-radius:6px;"
+              >
+              <div class="sub">쉼표(,)로 구분. 예: <code>09:35,11:35,13:35,15:25</code></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="margin-top:12px;">
+        <button class="btn btn-primary" type="submit">저장</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>스케줄러 상태</h2>
+    <table>
+      <tbody>
+        <tr><th style="width:220px;">설정 파일</th><td><code>{{ schedule.source }}</code></td></tr>
+        <tr><th>스케줄러 루프 상태</th><td>{{ "실행 중" if schedule.scheduler_state.running else "초기화 중" }}</td></tr>
+        <tr><th>마지막 tick</th><td>{{ schedule.scheduler_state.last_tick or "-" }}</td></tr>
+        <tr><th>마지막 메시지</th><td>{{ schedule.scheduler_state.last_message or "-" }}</td></tr>
+        <tr><th>마지막 매수 트리거</th><td>{{ schedule.scheduler_state.last_triggered.buy or "-" }}</td></tr>
+        <tr><th>마지막 매도 트리거</th><td>{{ schedule.scheduler_state.last_triggered.sell or "-" }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

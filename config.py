@@ -89,9 +89,16 @@ def get_analyzers() -> list:
         except Exception as e:
             logging.warning(f"ClaudeAnalyzer 초기화 실패: {e}")
 
+    if os.environ.get("OPENAI_API_KEY"):
+        try:
+            from analyzers import OpenAIAnalyzer
+            analyzers.append(OpenAIAnalyzer())
+        except Exception as e:
+            logging.warning(f"OpenAIAnalyzer 초기화 실패: {e}")
+
     if not analyzers:
         raise RuntimeError(
             "활성화된 AI 분석기가 없습니다. "
-            ".env 파일에 GEMINI_API_KEY 또는 CLAUDE_API_KEY 를 설정해 주세요."
+            ".env 파일에 GEMINI_API_KEY, CLAUDE_API_KEY, OPENAI_API_KEY 중 하나 이상을 설정해 주세요."
         )
     return analyzers
