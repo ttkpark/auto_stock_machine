@@ -67,11 +67,10 @@ MODEL_OPTIONS: Dict[str, List[str]] = {
         "gemini-1.5-pro",
     ],
     "CLAUDE_MODEL_NAME": [
-        "claude-3-5-haiku-latest",
-        "claude-3-7-sonnet-latest",
-        "claude-3-7-sonnet-20250219",
-        "claude-3-5-sonnet-latest",
-        "claude-3-opus-latest",
+        "claude-haiku-4-5-latest",
+        "claude-sonnet-4-5-latest",
+        "claude-sonnet-4-6-latest",
+        "claude-opus-4-6-latest",
     ],
     "OPENAI_MODEL_NAME": [
         "gpt-4o-mini",

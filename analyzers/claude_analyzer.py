@@ -17,11 +17,11 @@ from utils.prompt_manager import build_buy_prompt, build_sell_prompt
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL_NAME = "claude-3-5-haiku-latest"
+DEFAULT_MODEL_NAME = "claude-haiku-4-5-latest"
 FALLBACK_MODEL_NAMES = [
-    "claude-3-5-haiku-latest",
-    "claude-3-7-sonnet-latest",
-    "claude-3-7-sonnet-20250219",
+    "claude-haiku-4-5-latest",
+    "claude-sonnet-4-5-latest",
+    "claude-sonnet-4-6-latest",
 ]
 
 

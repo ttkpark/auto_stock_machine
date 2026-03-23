@@ -12,6 +12,7 @@ REPO_URL="${DEFAULT_REPO_URL}"
 INSTALL_DIR="${HOME}/auto_stock_machine"
 PYTHON_BIN="python3"
 BRANCH="main"
+INSTALL_SYSTEMD="true"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -30,6 +31,10 @@ while [[ $# -gt 0 ]]; do
     --branch)
       BRANCH="${2:-}"
       shift 2
+      ;;
+    --no-systemd)
+      INSTALL_SYSTEMD="false"
+      shift 1
       ;;
     *)
       echo "[ERROR] Unknown argument: $1"
@@ -81,9 +86,46 @@ else
   echo "  - Existing .env found, keeping current values"
 fi
 
-echo "[7/7] Done."
+echo "[7/7] Configuring systemd service..."
+if [[ "${INSTALL_SYSTEMD}" == "true" ]]; then
+  if command -v systemctl >/dev/null 2>&1; then
+    SERVICE_NAME="auto-stock-machine-web"
+    SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+    USER_NAME="$(whoami)"
+
+    sudo tee "${SERVICE_FILE}" >/dev/null <<EOF
+[Unit]
+Description=Auto Stock Machine Web Admin
+After=network.target
+
+[Service]
+Type=simple
+User=${USER_NAME}
+WorkingDirectory=${INSTALL_DIR}
+ExecStart=${INSTALL_DIR}/.venv/bin/python ${INSTALL_DIR}/web_admin.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now "${SERVICE_NAME}"
+    echo "  - systemd enabled: ${SERVICE_NAME}"
+  else
+    echo "  - systemctl not found, skipped systemd registration"
+  fi
+else
+  echo "  - --no-systemd set, skipped systemd registration"
+fi
+
+echo
+echo "Done."
 echo
 echo "Install path : ${INSTALL_DIR}"
 echo "Activate venv: source ${INSTALL_DIR}/.venv/bin/activate"
 echo "Edit env file: nano ${INSTALL_DIR}/.env"
 echo "Quick check  : ${INSTALL_DIR}/.venv/bin/python ${INSTALL_DIR}/main.py --mode status"
+echo "Service check: sudo systemctl status auto-stock-machine-web --no-pager"
