@@ -69,7 +69,6 @@ MODEL_OPTIONS: Dict[str, List[str]] = {
     "CLAUDE_MODEL_NAME": [
         "claude-haiku-4-5-latest",
         "claude-sonnet-4-5-latest",
-        "claude-sonnet-4-6-latest",
         "claude-opus-4-6-latest",
     ],
     "OPENAI_MODEL_NAME": [

@@ -21,7 +21,6 @@ DEFAULT_MODEL_NAME = "claude-haiku-4-5-latest"
 FALLBACK_MODEL_NAMES = [
     "claude-haiku-4-5-latest",
     "claude-sonnet-4-5-latest",
-    "claude-sonnet-4-6-latest",
 ]
 
 
