@@ -9,10 +9,10 @@ crontab 없이 Python 프로세스 내에서 평일 지정 시각에
 """
 import logging
 import time
-from datetime import datetime
 
 import schedule
 
+import config
 from bot_service import execute_mode
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 def _is_weekday() -> bool:
     """오늘이 평일(월~금)인지 확인합니다."""
-    return datetime.now().weekday() < 5  # 0=월 ~ 4=금
+    return config.now().weekday() < 5  # 0=월 ~ 4=금
 
 
 def _run_if_weekday(mode: str) -> None:

@@ -15,11 +15,12 @@ import sys
 import threading
 import time
 import uuid
-from datetime import datetime
 from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, List
 from zoneinfo import ZoneInfo
+
+import config as _cfg
 
 from dotenv import load_dotenv
 from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
@@ -83,6 +84,7 @@ MODEL_OPTIONS: Dict[str, List[str]] = {
 # 웹에서 관리할 환경 변수 목록
 MANAGED_KEYS: List[str] = [
     "IS_REAL_TRADING",
+    "APP_TIMEZONE",
     "BUY_BUDGET_RATIO",
     "MIN_AI_CONSENSUS",
     "TAKE_PROFIT_RATE",
@@ -247,7 +249,7 @@ def _append_action_history(action: str, status: str, detail: str) -> None:
     rows = _load_action_history()
     rows.append(
         {
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "time": _cfg.now().strftime("%Y-%m-%d %H:%M:%S"),
             "action": action,
             "status": status,
             "detail": detail,
@@ -264,7 +266,7 @@ def _parse_today_log_actions() -> List[str]:
     """
     if not LOG_PATH.exists():
         return []
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = _cfg.now().strftime("%Y-%m-%d")
     lines = LOG_PATH.read_text(encoding="utf-8", errors="ignore").splitlines()
     keywords = ("[매수", "[매도", "[현황", "최종 결정", "손절", "치명적 오류")
     filtered: List[str] = []
@@ -306,7 +308,7 @@ def _run_ai_action_in_background(mode: str, run_id: str) -> None:
                 "running": True,
                 "run_id": run_id,
                 "mode": mode,
-                "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "started_at": _cfg.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "finished_at": "",
                 "last_result": None,
             }
@@ -315,7 +317,7 @@ def _run_ai_action_in_background(mode: str, run_id: str) -> None:
     result = _run_bot_mode(mode, run_id=run_id)
     with AI_RUN_LOCK:
         AI_RUN_STATE["running"] = False
-        AI_RUN_STATE["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        AI_RUN_STATE["finished_at"] = _cfg.now().strftime("%Y-%m-%d %H:%M:%S")
         AI_RUN_STATE["last_result"] = result
 
 
@@ -346,7 +348,9 @@ def _server_status_snapshot() -> Dict[str, Any]:
     uptime_sec = int(time.time() - APP_STARTED_AT)
     log_mtime = "-"
     if LOG_PATH.exists():
-        log_mtime = datetime.fromtimestamp(LOG_PATH.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        from datetime import datetime as _dt
+        tz = ZoneInfo(_cfg.APP_TIMEZONE)
+        log_mtime = _dt.fromtimestamp(LOG_PATH.stat().st_mtime, tz=tz).strftime("%Y-%m-%d %H:%M:%S")
     h, p = _RUNTIME_LISTEN
     return {
         "host": f"{h}:{p}",
@@ -364,7 +368,7 @@ def _server_status_snapshot() -> Dict[str, Any]:
 
 def _count_today_ai_calls() -> Dict[str, int]:
     """오늘자 ai_traces.jsonl 에서 AI 엔진별 API 호출 횟수를 집계합니다."""
-    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_str = _cfg.now().strftime("%Y-%m-%d")
     counts: Dict[str, int] = {"Gemini": 0, "Claude": 0, "ChatGPT": 0}
     if not AI_TRACE_PATH.exists():
         return counts
@@ -486,7 +490,7 @@ def _check_all_ai_usage() -> Dict[str, Any]:
     label_map = {"Anthropic Claude": "Claude", "OpenAI ChatGPT": "ChatGPT", "Google Gemini": "Gemini"}
     for p in providers:
         p["today_calls"] = today_calls.get(label_map.get(p["provider"], ""), 0)
-    return {"providers": providers, "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+    return {"providers": providers, "checked_at": _cfg.now().strftime("%Y-%m-%d %H:%M:%S")}
 
 
 # ── 동적 모델 목록 조회 ─────────────────────────────────────
@@ -615,10 +619,11 @@ def _normalize_weekdays(raw: str) -> str:
 
 
 def _default_schedule_config() -> Dict[str, Any]:
+    default_tz = os.environ.get("APP_TIMEZONE", "Asia/Seoul").strip() or "Asia/Seoul"
     return {
         "enabled": False,
         "weekdays": "1-5",
-        "timezone": "Asia/Seoul",
+        "timezone": default_tz,
         "buy_times": ["09:05", "11:05", "13:05", "15:05"],
         "sell_times": ["09:35", "11:35", "13:35", "15:25"],
     }
@@ -658,11 +663,12 @@ def _save_schedule_config(
     SCHEDULE_CONFIG_PATH.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _current_time_in_timezone(timezone_name: str) -> datetime:
+def _current_time_in_timezone(timezone_name: str):
     try:
-        return datetime.now(ZoneInfo(timezone_name))
+        return _cfg.now()
     except Exception:
-        return datetime.now()
+        from datetime import datetime
+        return datetime.now(ZoneInfo("Asia/Seoul"))
 
 
 def _time_due(now: datetime, weekdays: str, hhmm_list: List[str]) -> bool:

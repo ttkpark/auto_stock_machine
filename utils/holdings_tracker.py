@@ -5,8 +5,10 @@ data/holdings_tracker.json에 종목별 매수일과 최고가를 기록하여
 """
 import json
 import logging
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
+
+import config as _cfg
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +41,7 @@ class HoldingsTracker:
         if ticker in self._data:
             return
         self._data[ticker] = {
-            "buy_date": buy_date or date.today().isoformat(),
+            "buy_date": buy_date or _cfg.now().strftime("%Y-%m-%d"),
             "trailing_high": 0,
         }
         self._save()
@@ -65,7 +67,7 @@ class HoldingsTracker:
             return None
         try:
             buy = datetime.strptime(entry["buy_date"], "%Y-%m-%d").date()
-            return (date.today() - buy).days
+            return (_cfg.now().date() - buy).days
         except (ValueError, TypeError):
             return None
 
@@ -95,7 +97,7 @@ class HoldingsTracker:
             ticker = h["ticker"]
             if ticker not in self._data:
                 self._data[ticker] = {
-                    "buy_date": date.today().isoformat(),
+                    "buy_date": _cfg.now().strftime("%Y-%m-%d"),
                     "trailing_high": h.get("current_price", 0),
                 }
 

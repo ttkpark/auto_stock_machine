@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     ports:
       - "8004:8004"
+    environment:
+      - TZ=Asia/Seoul
     env_file:
       - .env
     volumes:

@@ -6,11 +6,28 @@ python-dotenv 패키지가 필요합니다: pip install python-dotenv
 """
 import os
 import logging
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
 from dotenv import load_dotenv
 
 # 프로젝트 루트의 .env 파일을 자동으로 로드
 load_dotenv(Path(__file__).parent / ".env")
+
+
+# =============================================
+# 타임존 설정
+# =============================================
+APP_TIMEZONE: str = os.environ.get("APP_TIMEZONE", "Asia/Seoul").strip() or "Asia/Seoul"
+
+
+def now() -> datetime:
+    """APP_TIMEZONE 기준 현재 시각을 반환합니다."""
+    try:
+        return datetime.now(ZoneInfo(APP_TIMEZONE))
+    except Exception:
+        return datetime.now(ZoneInfo("Asia/Seoul"))
 
 
 # =============================================
@@ -36,7 +53,7 @@ STOP_LOSS_RATE: float = -3.0     # 수익률 -3% 이하면 즉시 손절 (AI 판
 
 # 동적 손절 (ATR 기반 트레일링 스탑)
 TRAILING_STOP_ATR_MULTIPLIER: float = 2.0   # ATR × 이 배수만큼 트레일링 하이에서 하락하면 손절
-MARKET_CRASH_THRESHOLD: float = -2.0         # KOSPI/KOSDAQ 전일 대비 이 비율 이하 → 시장 급락 판단
+MARKET_CRASH_THRESHOLD: float = -3.5         # KOSPI/KOSDAQ 전일 대비 이 비율 이하 → 시장 급락 판단
 STAGNANT_HOLDING_DAYS: int = 30              # 이 일수 이상 보유 시 장기 횡보 경고 (AI 참고용)
 
 # =============================================

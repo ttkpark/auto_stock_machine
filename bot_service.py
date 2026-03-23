@@ -8,7 +8,6 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Literal
 
@@ -33,7 +32,7 @@ class TraceRecorder:
     def record(self, event_type: str, **payload: Any) -> None:
         TRACE_PATH.parent.mkdir(parents=True, exist_ok=True)
         row = {
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "time": config_module.now().strftime("%Y-%m-%d %H:%M:%S"),
             "run_id": self.run_id,
             "mode": self.mode,
             "trading_mode": self.trading_mode,
@@ -225,23 +224,32 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
     tracker.sync_from_holdings(holdings)
     decision_maker = DecisionMaker()
 
-    # ── 1단계: 시장 급락 감지 → 전 종목 방어 매도 ──
-    crash_threshold = getattr(cfg, "MARKET_CRASH_THRESHOLD", -2.0)
-    if market_data.is_market_crash(threshold=crash_threshold):
+    # ── 1단계: 시장 급락 감지 → 손실 종목만 방어 매도, 수익 종목은 AI 판단 ──
+    crash_threshold = getattr(cfg, "MARKET_CRASH_THRESHOLD", -3.5)
+    is_crash = market_data.is_market_crash(threshold=crash_threshold)
+    crash_msg = ""
+    if is_crash:
         idx = market_data.get_market_index_change()
         crash_msg = (
             f"KOSPI {idx['kospi_change_pct']:+.1f}% / KOSDAQ {idx['kosdaq_change_pct']:+.1f}%"
             if idx else "지수 데이터 없음"
         )
-        logger.warning(f"[시장 급락] {crash_msg} — 전 종목 방어 매도 실행")
-        notifier.send(f"[긴급 방어 매도] 시장 급락 감지! {crash_msg}")
-        for holding in holdings:
+        logger.warning(f"[시장 급락] {crash_msg}")
+        notifier.send(f"[시장 급락 감지] {crash_msg}")
+
+        # 손실 중인 종목만 즉시 방어 매도
+        loss_holdings = [h for h in holdings if h["profit_rate"] < 0]
+        profit_holdings = [h for h in holdings if h["profit_rate"] >= 0]
+
+        for holding in loss_holdings:
+            logger.warning(f"[급락 방어 매도] {holding['name']} 수익률 {holding['profit_rate']:.1f}% — 손실 종목 즉시 매도")
             success = broker.sell_order(ticker=holding["ticker"], qty=holding["qty"])
             if success:
                 notifier.notify_sell_order(
                     holding["name"], holding["ticker"], holding["qty"],
                     holding["avg_price"], holding["current_price"],
                 )
+                notifier.send(f"[급락 방어 매도] {holding['name']} | 수익률 {holding['profit_rate']:.1f}%")
                 tracker.record_sell(holding["ticker"])
             trace.record(
                 "sell_market_crash",
@@ -252,8 +260,14 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
                 success=success,
                 crash_info=crash_msg,
             )
-        logger.info("[매도 로직] 시장 급락 방어 매도 완료")
-        return
+
+        if not profit_holdings:
+            logger.info("[매도 로직] 시장 급락 방어 매도 완료 (수익 종목 없음)")
+            return
+
+        # 수익 중인 종목은 아래 2단계에서 AI가 판단 (crash_msg를 context에 포함)
+        logger.info(f"수익 중 {len(profit_holdings)}개 종목은 AI 판단으로 전환")
+        holdings = profit_holdings
 
     # ── 2단계: 종목별 분석 ──
     atr_multiplier = getattr(cfg, "TRAILING_STOP_ATR_MULTIPLIER", 2.0)
@@ -283,6 +297,8 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
             trailing_high=trailing_high,
             atr_multiplier=atr_multiplier,
         )
+        if is_crash and crash_msg:
+            enriched_context = f"[경고: 시장 급락 중] {crash_msg}\n{enriched_context}"
 
         trace.record(
             "sell_holding_checked",
