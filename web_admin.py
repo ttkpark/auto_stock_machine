@@ -360,6 +360,136 @@ def _server_status_snapshot() -> Dict[str, Any]:
     }
 
 
+# ── AI 사용량 모니터링 ──────────────────────────────────────
+
+
+def _count_today_ai_calls() -> Dict[str, int]:
+    """오늘자 ai_traces.jsonl 에서 AI 엔진별 API 호출 횟수를 집계합니다."""
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    counts: Dict[str, int] = {"Gemini": 0, "Claude": 0, "ChatGPT": 0}
+    if not AI_TRACE_PATH.exists():
+        return counts
+    try:
+        for line in AI_TRACE_PATH.read_text(encoding="utf-8").splitlines():
+            if today_str not in line:
+                continue
+            entry = json.loads(line)
+            analyzer = entry.get("payload", {}).get("analyzer", "")
+            if "Gemini" in analyzer:
+                counts["Gemini"] += 1
+            elif "Claude" in analyzer:
+                counts["Claude"] += 1
+            elif "OpenAI" in analyzer:
+                counts["ChatGPT"] += 1
+    except Exception:
+        pass
+    return counts
+
+
+def _format_number(val: str) -> str:
+    """숫자 문자열에 천 단위 콤마를 추가합니다."""
+    try:
+        return f"{int(val):,}"
+    except (ValueError, TypeError):
+        return val
+
+
+def _check_anthropic_usage() -> Dict[str, Any]:
+    """Anthropic Claude API 상태 및 rate limit 를 확인합니다."""
+    import requests as req
+
+    key = os.environ.get("CLAUDE_API_KEY", "")
+    if not key:
+        return {"provider": "Anthropic Claude", "status": "not_configured"}
+    model = os.environ.get("CLAUDE_MODEL_NAME", "").strip() or "claude-haiku-4-5-latest"
+    try:
+        resp = req.post(
+            "https://api.anthropic.com/v1/messages/count_tokens",
+            headers={
+                "x-api-key": key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={"model": model, "messages": [{"role": "user", "content": "hi"}]},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            rl = {
+                "요청 한도": _format_number(resp.headers.get("anthropic-ratelimit-requests-limit", "-")),
+                "남은 요청": _format_number(resp.headers.get("anthropic-ratelimit-requests-remaining", "-")),
+                "토큰 한도": _format_number(resp.headers.get("anthropic-ratelimit-tokens-limit", "-")),
+                "남은 토큰": _format_number(resp.headers.get("anthropic-ratelimit-tokens-remaining", "-")),
+            }
+            return {"provider": "Anthropic Claude", "status": "active", "model": model, "rate_limits": rl}
+        return {"provider": "Anthropic Claude", "status": "error", "model": model, "error": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"provider": "Anthropic Claude", "status": "error", "model": model, "error": str(e)[:200]}
+
+
+def _check_openai_usage() -> Dict[str, Any]:
+    """OpenAI API 상태를 확인합니다."""
+    import requests as req
+
+    key = os.environ.get("OPENAI_API_KEY", "")
+    if not key:
+        return {"provider": "OpenAI ChatGPT", "status": "not_configured"}
+    model = os.environ.get("OPENAI_MODEL_NAME", "").strip() or "gpt-4o-mini"
+    try:
+        # 최소 completion 요청으로 rate limit 헤더 확보
+        resp = req.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json={"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            rl = {}
+            for hdr, label in [
+                ("x-ratelimit-limit-requests", "요청 한도"),
+                ("x-ratelimit-remaining-requests", "남은 요청"),
+                ("x-ratelimit-limit-tokens", "토큰 한도"),
+                ("x-ratelimit-remaining-tokens", "남은 토큰"),
+            ]:
+                val = resp.headers.get(hdr, "-")
+                rl[label] = _format_number(val)
+            return {"provider": "OpenAI ChatGPT", "status": "active", "model": model, "rate_limits": rl}
+        return {"provider": "OpenAI ChatGPT", "status": "error", "model": model, "error": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"provider": "OpenAI ChatGPT", "status": "error", "model": model, "error": str(e)[:200]}
+
+
+def _check_gemini_usage() -> Dict[str, Any]:
+    """Google Gemini API 상태를 확인합니다."""
+    import requests as req
+
+    key = os.environ.get("GEMINI_API_KEY", "")
+    if not key:
+        return {"provider": "Google Gemini", "status": "not_configured"}
+    model = os.environ.get("GEMINI_MODEL_NAME", "").strip() or "gemini-2.0-flash"
+    try:
+        resp = req.get(
+            f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            return {"provider": "Google Gemini", "status": "active", "model": model, "rate_limits": None}
+        return {"provider": "Google Gemini", "status": "error", "model": model, "error": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"provider": "Google Gemini", "status": "error", "model": model, "error": str(e)[:200]}
+
+
+def _check_all_ai_usage() -> Dict[str, Any]:
+    """모든 AI 제공자의 상태와 오늘 호출 횟수를 종합합니다."""
+    providers = []
+    for check_fn in (_check_anthropic_usage, _check_openai_usage, _check_gemini_usage):
+        providers.append(check_fn())
+    today_calls = _count_today_ai_calls()
+    label_map = {"Anthropic Claude": "Claude", "OpenAI ChatGPT": "ChatGPT", "Google Gemini": "Gemini"}
+    for p in providers:
+        p["today_calls"] = today_calls.get(label_map.get(p["provider"], ""), 0)
+    return {"providers": providers, "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+
 def _read_bool_env(key: str, default: bool = False) -> bool:
     return os.environ.get(key, str(default)).lower() == "true"
 
@@ -736,6 +866,11 @@ def create_app() -> Flask:
     def server():
         status = _server_status_snapshot()
         return render_template("server.html", status=status)
+
+    @app.get("/api/ai-usage")
+    @_login_required
+    def api_ai_usage():
+        return jsonify(_check_all_ai_usage())
 
     @app.get("/schedule")
     @_login_required

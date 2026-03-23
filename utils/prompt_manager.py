@@ -5,7 +5,7 @@
 
 매수 변수:  {balance}, {budget_instruction}, {market_info_line}
 예산 변수:  {buy_budget_ratio}, {max_buy_stocks}
-매도 변수:  {stock_name}, {ticker}, {qty}, {avg_price}, {current_price}, {profit_rate}
+매도 변수:  {stock_name}, {ticker}, {qty}, {avg_price}, {current_price}, {profit_rate}, {market_info_line}
 """
 import json
 import os
@@ -48,7 +48,8 @@ DEFAULT_SELL_TEMPLATE = (
     "당신은 한국 주식 전문가입니다.\n"
     "내가 보유한 {stock_name}({ticker}) 주식은 {qty}주이고, "
     "평단가는 {avg_price}원인데 현재가는 {current_price}원 (수익률 {profit_rate}%)입니다.\n"
-    "현재 시장 상황에서 지금 매도할까요, 보유할까요?\n"
+    "{market_info_line}\n"
+    "위 정보를 종합적으로 고려하여 지금 매도할까요, 보유할까요?\n"
     "답변은 반드시 아래 JSON 형식으로만 출력하세요.\n"
     '{"결정": "매도", "이유": "목표 수익률 달성"}\n'
     '"결정" 필드는 반드시 "매도" 또는 "보유" 중 하나여야 합니다.'
@@ -176,8 +177,10 @@ def build_sell_prompt(
     avg_price: int,
     current_price: int,
     profit_rate: float,
+    market_info: str = "",
 ) -> str:
     template = load_prompts()["sell"]
+    market_info_line = market_info if market_info else ""
     return _apply_template(
         template,
         {
@@ -187,5 +190,6 @@ def build_sell_prompt(
             "avg_price": f"{avg_price:,}",
             "current_price": f"{current_price:,}",
             "profit_rate": f"{profit_rate:.1f}",
+            "market_info_line": market_info_line,
         },
     )

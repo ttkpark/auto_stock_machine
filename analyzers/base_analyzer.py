@@ -70,9 +70,11 @@ class BaseAnalyzer(ABC):
         avg_price: int,
         current_price: int,
         profit_rate: float,
+        market_info: str = "",
     ) -> SellDecision:
         """
         보유 종목의 매도 여부 판단.
+        market_info: 기술 지표·시장 현황 등 추가 컨텍스트 (선택)
         반환: SellDecision (action = "매도" 또는 "보유")
         """
         pass

@@ -108,6 +108,7 @@ class GeminiAnalyzer(BaseAnalyzer):
         avg_price: int,
         current_price: int,
         profit_rate: float,
+        market_info: str = "",
     ) -> SellDecision:
         prompt = build_sell_prompt(
             stock_name=stock_name,
@@ -116,6 +117,7 @@ class GeminiAnalyzer(BaseAnalyzer):
             avg_price=avg_price,
             current_price=current_price,
             profit_rate=profit_rate,
+            market_info=market_info,
         )
         try:
             response = self._generate_content_with_fallback(prompt)

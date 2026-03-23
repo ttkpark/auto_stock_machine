@@ -34,6 +34,11 @@ MAX_BUY_STOCKS: int = 3
 TAKE_PROFIT_RATE: float = 5.0    # 수익률 +5% 이상이면 AI에게 매도 판단 요청
 STOP_LOSS_RATE: float = -3.0     # 수익률 -3% 이하면 즉시 손절 (AI 판단 없이)
 
+# 동적 손절 (ATR 기반 트레일링 스탑)
+TRAILING_STOP_ATR_MULTIPLIER: float = 2.0   # ATR × 이 배수만큼 트레일링 하이에서 하락하면 손절
+MARKET_CRASH_THRESHOLD: float = -2.0         # KOSPI/KOSDAQ 전일 대비 이 비율 이하 → 시장 급락 판단
+STAGNANT_HOLDING_DAYS: int = 30              # 이 일수 이상 보유 시 장기 횡보 경고 (AI 참고용)
+
 # =============================================
 # 스케줄 설정 (내장 스케줄러 사용)
 # =============================================

@@ -14,7 +14,7 @@ from typing import Any, Dict, Literal
 
 import config as config_module
 from notifiers import TelegramNotifier
-from utils import DecisionMaker, StockValidator
+from utils import DecisionMaker, HoldingsTracker, MarketDataProvider, StockValidator
 
 BotMode = Literal["buy", "sell", "status", "ask"]
 TRACE_PATH = Path("data/ai_traces.jsonl")
@@ -176,6 +176,7 @@ def run_buy_logic(
         success = broker.buy_order(ticker=ticker, qty=qty)
         if success:
             bought_count += 1
+            HoldingsTracker().record_buy(ticker)
             notifier.notify_buy_order(agreed_stock_name, ticker, qty, current_price)
             detail_msg = (
                 f"\n추천 AI: {', '.join(ai_list)}\n"
@@ -207,7 +208,7 @@ def run_buy_logic(
 
 
 def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: TraceRecorder):
-    """매도 로직: 보유 종목 순회 → 손절/AI 판단 → 매도 주문"""
+    """매도 로직: 시장 급락 감지 → 동적 손절 → AI 판단 (사각지대 제거)"""
     logger.info("=" * 50)
     logger.info("[매도 로직] 시작")
 
@@ -218,7 +219,45 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
         trace.record("sell_skipped", reason="보유 종목 없음")
         return
 
+    # 헬퍼 초기화
+    market_data = MarketDataProvider()
+    tracker = HoldingsTracker()
+    tracker.sync_from_holdings(holdings)
     decision_maker = DecisionMaker()
+
+    # ── 1단계: 시장 급락 감지 → 전 종목 방어 매도 ──
+    crash_threshold = getattr(cfg, "MARKET_CRASH_THRESHOLD", -2.0)
+    if market_data.is_market_crash(threshold=crash_threshold):
+        idx = market_data.get_market_index_change()
+        crash_msg = (
+            f"KOSPI {idx['kospi_change_pct']:+.1f}% / KOSDAQ {idx['kosdaq_change_pct']:+.1f}%"
+            if idx else "지수 데이터 없음"
+        )
+        logger.warning(f"[시장 급락] {crash_msg} — 전 종목 방어 매도 실행")
+        notifier.send(f"[긴급 방어 매도] 시장 급락 감지! {crash_msg}")
+        for holding in holdings:
+            success = broker.sell_order(ticker=holding["ticker"], qty=holding["qty"])
+            if success:
+                notifier.notify_sell_order(
+                    holding["name"], holding["ticker"], holding["qty"],
+                    holding["avg_price"], holding["current_price"],
+                )
+                tracker.record_sell(holding["ticker"])
+            trace.record(
+                "sell_market_crash",
+                stock_name=holding["name"],
+                ticker=holding["ticker"],
+                qty=holding["qty"],
+                profit_rate=holding["profit_rate"],
+                success=success,
+                crash_info=crash_msg,
+            )
+        logger.info("[매도 로직] 시장 급락 방어 매도 완료")
+        return
+
+    # ── 2단계: 종목별 분석 ──
+    atr_multiplier = getattr(cfg, "TRAILING_STOP_ATR_MULTIPLIER", 2.0)
+
     for holding in holdings:
         name = holding["name"]
         ticker = holding["ticker"]
@@ -231,6 +270,20 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
             f"보유 종목 검토: {name} ({ticker}) "
             f"{qty}주 | 수익률 {profit_rate:.1f}%"
         )
+
+        # 보유 기간 및 트레일링 하이 갱신
+        holding_days = tracker.get_holding_days(ticker)
+        tracker.update_trailing_high(ticker, current_price)
+        trailing_high = tracker.get_trailing_high(ticker)
+
+        # enriched context 생성 (기술 지표 + 시장 현황)
+        enriched_context = market_data.build_enriched_context(
+            ticker=ticker,
+            holding_days=holding_days,
+            trailing_high=trailing_high,
+            atr_multiplier=atr_multiplier,
+        )
+
         trace.record(
             "sell_holding_checked",
             stock_name=name,
@@ -239,78 +292,105 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
             avg_price=avg_price,
             current_price=current_price,
             profit_rate=profit_rate,
+            holding_days=holding_days,
+            trailing_high=trailing_high,
+            enriched_context=enriched_context,
         )
 
+        # ── 2a: 동적 손절 (ATR 트레일링 스탑) ──
+        df = market_data.get_daily_prices(ticker)
+        atr = market_data.compute_atr(df) if df is not None else None
+
+        if atr and trailing_high:
+            dynamic_stop = trailing_high - (atr * atr_multiplier)
+            if current_price <= dynamic_stop:
+                logger.warning(
+                    f"[동적 손절] {name} 현재가 {current_price:,} ≤ "
+                    f"트레일링 스탑 {dynamic_stop:,.0f} (고가 {trailing_high:,} - ATR {atr:,.0f}×{atr_multiplier})"
+                )
+                success = broker.sell_order(ticker=ticker, qty=qty)
+                if success:
+                    notifier.notify_sell_order(name, ticker, qty, avg_price, current_price)
+                    notifier.send(
+                        f"[동적 손절] {name} | ATR 트레일링 스탑 발동\n"
+                        f"고가 {trailing_high:,} → 손절라인 {dynamic_stop:,.0f}원"
+                    )
+                    tracker.record_sell(ticker)
+                trace.record(
+                    "sell_trailing_stop",
+                    stock_name=name, ticker=ticker, qty=qty,
+                    profit_rate=profit_rate, success=success,
+                    trailing_high=trailing_high, atr=atr,
+                    dynamic_stop=round(dynamic_stop),
+                )
+                continue
+
+        # ── 2b: 고정 손절 (ATR 데이터 없을 때 폴백) ──
         if profit_rate <= cfg.STOP_LOSS_RATE:
-            logger.warning(f"[손절] {name} 수익률 {profit_rate:.1f}% - 즉시 매도")
+            logger.warning(f"[고정 손절] {name} 수익률 {profit_rate:.1f}% - 즉시 매도")
             success = broker.sell_order(ticker=ticker, qty=qty)
             if success:
                 notifier.notify_sell_order(name, ticker, qty, avg_price, current_price)
                 notifier.send(f"[손절 매도] {name} | 손실률 {profit_rate:.1f}%")
+                tracker.record_sell(ticker)
             trace.record(
-                "sell_stop_loss_result",
-                stock_name=name,
-                ticker=ticker,
-                qty=qty,
-                profit_rate=profit_rate,
-                success=success,
+                "sell_stop_loss",
+                stock_name=name, ticker=ticker, qty=qty,
+                profit_rate=profit_rate, success=success,
             )
             continue
 
-        if profit_rate >= cfg.TAKE_PROFIT_RATE:
-            decisions = []
-            for analyzer in analyzers:
-                decision = analyzer.decide_sell(
-                    stock_name=name,
-                    ticker=ticker,
-                    qty=qty,
-                    avg_price=avg_price,
-                    current_price=current_price,
-                    profit_rate=profit_rate,
-                )
-                logger.info(f"[{decision.ai_model}] {name} → {decision.action}: {decision.reason}")
-                decisions.append(decision)
-                trace.record(
-                    "sell_ai_decision",
-                    stock_name=name,
-                    ticker=ticker,
-                    ai_model=decision.ai_model,
-                    action=decision.action,
-                    reason=decision.reason,
-                    profit_rate=profit_rate,
-                )
-
-            final_decision = decision_maker.decide_sell_by_vote(decisions)
-            logger.info(f"최종 결정: {name} → {final_decision.action}")
-            trace.record(
-                "sell_final_decision",
+        # ── 2c: AI 투표 (모든 나머지 경우 — 사각지대 제거) ──
+        decisions = []
+        for analyzer in analyzers:
+            decision = analyzer.decide_sell(
                 stock_name=name,
                 ticker=ticker,
-                action=final_decision.action,
-                reason=final_decision.reason,
+                qty=qty,
+                avg_price=avg_price,
+                current_price=current_price,
+                profit_rate=profit_rate,
+                market_info=enriched_context,
+            )
+            logger.info(f"[{decision.ai_model}] {name} → {decision.action}: {decision.reason}")
+            decisions.append(decision)
+            trace.record(
+                "sell_ai_decision",
+                stock_name=name, ticker=ticker,
+                ai_model=decision.ai_model,
+                action=decision.action,
+                reason=decision.reason,
+                profit_rate=profit_rate,
             )
 
-            if final_decision.action == "매도":
-                success = broker.sell_order(ticker=ticker, qty=qty)
-                if success:
-                    notifier.notify_sell_order(name, ticker, qty, avg_price, current_price)
-                    notifier.send(f"[매도 이유] {final_decision.reason}")
-                trace.record(
-                    "sell_order_result",
-                    stock_name=name,
-                    ticker=ticker,
-                    qty=qty,
-                    success=success,
-                    reason=final_decision.reason,
-                )
+        final_decision = decision_maker.decide_sell_by_vote(decisions)
+        logger.info(f"최종 결정: {name} → {final_decision.action}")
+        trace.record(
+            "sell_final_decision",
+            stock_name=name, ticker=ticker,
+            action=final_decision.action,
+            reason=final_decision.reason,
+            profit_rate=profit_rate,
+            holding_days=holding_days,
+        )
+
+        if final_decision.action == "매도":
+            success = broker.sell_order(ticker=ticker, qty=qty)
+            if success:
+                notifier.notify_sell_order(name, ticker, qty, avg_price, current_price)
+                notifier.send(f"[매도 이유] {final_decision.reason}")
+                tracker.record_sell(ticker)
+            trace.record(
+                "sell_order_result",
+                stock_name=name, ticker=ticker, qty=qty,
+                success=success, reason=final_decision.reason,
+            )
         else:
-            logger.info(f"{name}: 매도 조건 미달 ({profit_rate:.1f}%) - 보유 유지")
             trace.record(
                 "sell_hold",
-                stock_name=name,
-                ticker=ticker,
+                stock_name=name, ticker=ticker,
                 profit_rate=profit_rate,
-                take_profit_rate=cfg.TAKE_PROFIT_RATE,
+                reason=final_decision.reason,
             )
 
     logger.info("[매도 로직] 완료")

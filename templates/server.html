@@ -16,4 +16,93 @@
       </tbody>
     </table>
   </div>
+
+  <!-- AI 사용량 모니터링 -->
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <h2 style="margin:0;">AI 사용량 모니터링</h2>
+      <button class="btn btn-primary" id="btn-check" onclick="checkAiUsage()">조회</button>
+    </div>
+    <div id="ai-usage-result">
+      <p style="color:#5a6474; font-size:14px;">[조회] 버튼을 누르면 각 AI 제공자의 API 상태와 rate limit 정보를 확인합니다.</p>
+    </div>
+  </div>
+
+  <style>
+    .ai-provider { margin-bottom: 12px; }
+    .ai-provider:last-child { margin-bottom: 0; }
+    .provider-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .provider-name { font-weight: 700; font-size: 15px; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; }
+    .badge-active { background: #e8f8ee; color: #0a6b2d; }
+    .badge-error { background: #fde9ec; color: #a40020; }
+    .badge-off { background: #f2f4f9; color: #5a6474; }
+    .rl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px; }
+    .rl-item { background: #f9fbff; border-radius: 6px; padding: 8px 10px; }
+    .rl-label { font-size: 12px; color: #5a6474; }
+    .rl-value { font-size: 16px; font-weight: 700; margin-top: 2px; }
+    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #ddd; border-top: 2px solid #1e66f5; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; margin-right: 6px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+
+  <script>
+    function checkAiUsage() {
+      var btn = document.getElementById('btn-check');
+      var container = document.getElementById('ai-usage-result');
+      btn.disabled = true;
+      btn.textContent = '조회 중...';
+      container.innerHTML = '<p><span class="spinner"></span> AI 제공자 상태를 확인하고 있습니다...</p>';
+
+      fetch('/api/ai-usage')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var html = '';
+          data.providers.forEach(function(p) {
+            html += '<div class="ai-provider">';
+            // 헤더: 이름 + 상태 뱃지
+            html += '<div class="provider-header">';
+            html += '<span class="provider-name">' + p.provider + '</span>';
+            if (p.status === 'active') {
+              html += '<span class="badge badge-active">Active</span>';
+            } else if (p.status === 'not_configured') {
+              html += '<span class="badge badge-off">미설정</span>';
+            } else {
+              html += '<span class="badge badge-error">Error</span>';
+            }
+            html += '</div>';
+
+            if (p.status === 'not_configured') {
+              html += '<p style="font-size:13px; color:#5a6474; margin:0;">API 키가 설정되지 않았습니다.</p>';
+            } else if (p.status === 'error') {
+              html += '<p style="font-size:13px; color:#a40020; margin:0;">오류: ' + (p.error || 'unknown') + '</p>';
+            }
+
+            if (p.model) {
+              html += '<div style="font-size:13px; color:#5a6474; margin:2px 0;">모델: <code>' + p.model + '</code></div>';
+            }
+
+            // rate limit 카드
+            html += '<div class="rl-grid">';
+            html += '<div class="rl-item"><div class="rl-label">오늘 호출</div><div class="rl-value">' + p.today_calls + '회</div></div>';
+            if (p.rate_limits) {
+              for (var key in p.rate_limits) {
+                html += '<div class="rl-item"><div class="rl-label">' + key + '</div><div class="rl-value">' + p.rate_limits[key] + '</div></div>';
+              }
+            }
+            html += '</div>';
+            html += '</div>';
+            html += '<hr style="border:none; border-top:1px solid #edf1f7; margin:10px 0;">';
+          });
+          html += '<div style="font-size:12px; color:#5a6474; text-align:right;">조회 시각: ' + data.checked_at + '</div>';
+          container.innerHTML = html;
+          btn.disabled = false;
+          btn.textContent = '조회';
+        })
+        .catch(function(err) {
+          container.innerHTML = '<p style="color:#a40020;">조회 실패: ' + err.message + '</p>';
+          btn.disabled = false;
+          btn.textContent = '조회';
+        });
+    }
+  </script>
 {% endblock %}
