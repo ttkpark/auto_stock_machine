@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% set active_page = "ask" %}
+{% set title = "종목 질문" %}
+{% block content %}
+  <div class="card">
+    <h2>종목 질문</h2>
+    <div class="sub">궁금한 종목을 자연어로 질문하면 AI가 분석해 드립니다.</div>
+    <form id="ask-form" style="display:flex;gap:8px;margin-top:12px;align-items:center;">
+      <input id="ask-input" type="text" placeholder="예: 하이브 주식이 궁금해" autocomplete="off"
+             style="flex:1;padding:10px 14px;border:1px solid #cdd5e0;border-radius:6px;font-size:15px;">
+      <button class="btn btn-primary" type="submit" id="ask-btn">분석 요청</button>
+    </form>
+  </div>
+
+  <div id="ask-loading" class="card" style="display:none;text-align:center;padding:30px;">
+    <div style="font-size:16px;color:#5a6474;">AI 분석 중입니다... 잠시만 기다려 주세요.</div>
+  </div>
+
+  <div id="ask-result" style="display:none;"></div>
+
+<style>
+  .analysis-card { margin-bottom: 10px; }
+  .analysis-card h3 { margin: 0 0 10px; font-size: 16px; color: #1e66f5; }
+  .analysis-row { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid #edf1f7; font-size: 14px; }
+  .analysis-label { min-width: 80px; font-weight: 700; color: #5a6474; flex-shrink: 0; }
+  .analysis-value { flex: 1; }
+  .stock-header { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+  .stock-price { font-size: 16px; color: #5a6474; }
+  .opinion-badge { display: inline-block; padding: 4px 10px; border-radius: 4px; font-weight: 700; font-size: 13px; }
+  .opinion-buy { background: #e8f8ee; color: #0a6b2d; }
+  .opinion-hold { background: #fff8e1; color: #a07800; }
+  .opinion-warn { background: #fde9ec; color: #a40020; }
+  .consensus-bar { margin-top: 14px; padding: 12px; background: #f5f7fb; border-radius: 6px; font-size: 14px; }
+</style>
+
+<script>
+  const form = document.getElementById("ask-form");
+  const input = document.getElementById("ask-input");
+  const btn = document.getElementById("ask-btn");
+  const loading = document.getElementById("ask-loading");
+  const resultBox = document.getElementById("ask-result");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const query = input.value.trim();
+    if (!query) return;
+
+    btn.disabled = true;
+    loading.style.display = "block";
+    resultBox.style.display = "none";
+    resultBox.innerHTML = "";
+
+    try {
+      const resp = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query }),
+      });
+      const data = await resp.json();
+      if (data.ok) {
+        renderResult(data.output);
+      } else {
+        resultBox.innerHTML = `<div class="card"><div class="bad">${escapeHtml(data.message || data.output || "오류가 발생했습니다.")}</div></div>`;
+        resultBox.style.display = "block";
+      }
+    } catch (err) {
+      resultBox.innerHTML = `<div class="card"><div class="bad">요청 실패: ${escapeHtml(err.message)}</div></div>`;
+      resultBox.style.display = "block";
+    } finally {
+      btn.disabled = false;
+      loading.style.display = "none";
+    }
+  });
+
+  function escapeHtml(text) {
+    const d = document.createElement("div");
+    d.textContent = text;
+    return d.innerHTML;
+  }
+
+  function opinionClass(opinion) {
+    if (!opinion) return "opinion-hold";
+    if (opinion.includes("매수") || opinion.includes("추천") || opinion.includes("긍정")) return "opinion-buy";
+    if (opinion.includes("주의") || opinion.includes("위험") || opinion.includes("매도")) return "opinion-warn";
+    return "opinion-hold";
+  }
+
+  function renderResult(text) {
+    /* The output is plain text formatted with = and - separators.
+       We parse it into structured HTML. */
+    const lines = text.split("\n");
+    let html = "";
+    let headerParsed = false;
+
+    // Parse header: stock name + price
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!headerParsed && trimmed && !trimmed.startsWith("=") && !trimmed.startsWith("-") && !trimmed.startsWith("[")) {
+        // e.g. "하이브 (352820) | 현재가: 250,000원"
+        html += `<div class="card"><div class="stock-header">${escapeHtml(trimmed)}</div></div>`;
+        headerParsed = true;
+        break;
+      }
+    }
+
+    // Parse AI sections
+    let currentAI = null;
+    let sections = [];
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const aiMatch = trimmed.match(/^\[(.+?)\]$/);
+      if (aiMatch) {
+        if (currentAI) sections.push(currentAI);
+        currentAI = { name: aiMatch[1], fields: [] };
+        continue;
+      }
+      if (currentAI && trimmed.includes(":")) {
+        const idx = trimmed.indexOf(":");
+        const label = trimmed.substring(0, idx).trim();
+        const value = trimmed.substring(idx + 1).trim();
+        if (label && value) {
+          currentAI.fields.push({ label, value });
+        }
+      }
+      // Consensus line
+      if (trimmed.startsWith("AI 의견 종합:")) {
+        if (currentAI) { sections.push(currentAI); currentAI = null; }
+        const consensus = trimmed.replace("AI 의견 종합:", "").trim();
+        sections.push({ consensus });
+      }
+    }
+    if (currentAI) sections.push(currentAI);
+
+    // Render sections
+    for (const sec of sections) {
+      if (sec.consensus) {
+        html += `<div class="card consensus-bar"><strong>AI 의견 종합:</strong> ${escapeHtml(sec.consensus)}</div>`;
+        continue;
+      }
+      html += `<div class="card analysis-card"><h3>${escapeHtml(sec.name)}</h3>`;
+      for (const f of sec.fields) {
+        let valueHtml = escapeHtml(f.value);
+        if (f.label === "종합 의견") {
+          valueHtml = `<span class="opinion-badge ${opinionClass(f.value)}">${escapeHtml(f.value)}</span>`;
+        }
+        html += `<div class="analysis-row"><div class="analysis-label">${escapeHtml(f.label)}</div><div class="analysis-value">${valueHtml}</div></div>`;
+      }
+      html += `</div>`;
+    }
+
+    if (!html) {
+      html = `<div class="card"><pre style="white-space:pre-wrap;font-size:14px;">${escapeHtml(text)}</pre></div>`;
+    }
+
+    resultBox.innerHTML = html;
+    resultBox.style.display = "block";
+  }
+</script>
+{% endblock %}

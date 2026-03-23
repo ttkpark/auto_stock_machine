@@ -647,6 +647,29 @@ def create_app() -> Flask:
         flash("설정이 저장되었습니다. 다음 실행부터 반영됩니다.", "success")
         return redirect(url_for("settings"))
 
+    @app.get("/ask")
+    @_login_required
+    def ask_page():
+        return render_template("ask.html")
+
+    @app.post("/api/ask")
+    @_login_required
+    def api_ask():
+        query = ""
+        if request.is_json:
+            query = str((request.get_json(silent=True) or {}).get("query", "")).strip()
+        else:
+            query = request.form.get("query", "").strip()
+        if not query:
+            return jsonify({"ok": False, "message": "질문을 입력해 주세요."}), 400
+        try:
+            result = execute_mode("ask", query=query)
+            _append_action_history("ask", "success" if result["ok"] else "failed", query)
+            return jsonify({"ok": result["ok"], "output": result.get("output", "")})
+        except Exception as e:
+            _append_action_history("ask", "failed", f"{query} | {e}")
+            return jsonify({"ok": False, "message": str(e)}), 500
+
     @app.get("/actions")
     @_login_required
     def actions():

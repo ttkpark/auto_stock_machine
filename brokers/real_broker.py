@@ -83,7 +83,7 @@ class RealBroker(BaseBroker):
         resp = requests.get(url, headers=headers, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
-        balance = int(data["output"]["ord_psbl_cash"])
+        balance = int(float(data["output"]["ord_psbl_cash"]))
         logger.info(f"[RealBroker] 주문 가능 예수금: {balance:,}원")
         return balance
 
@@ -114,15 +114,15 @@ class RealBroker(BaseBroker):
 
         holdings = []
         for item in data.get("output1", []):
-            qty = int(item.get("hldg_qty", 0))
+            qty = int(float(item.get("hldg_qty", 0)))
             if qty <= 0:
                 continue
             holdings.append({
                 "ticker": item.get("pdno", ""),
                 "name": item.get("prdt_name", ""),
                 "qty": qty,
-                "avg_price": int(item.get("pchs_avg_pric", 0)),
-                "current_price": int(item.get("prpr", 0)),
+                "avg_price": int(float(item.get("pchs_avg_pric", 0))),
+                "current_price": int(float(item.get("prpr", 0))),
                 "profit_rate": float(item.get("evlu_pfls_rt", 0.0)),
             })
         return holdings
@@ -136,7 +136,7 @@ class RealBroker(BaseBroker):
         try:
             resp = requests.get(url, headers=headers, params=params, timeout=10)
             resp.raise_for_status()
-            price = int(resp.json()["output"]["stck_prpr"])
+            price = int(float(resp.json()["output"]["stck_prpr"]))
             return price
         except Exception as e:
             logger.error(f"[RealBroker] 현재가 조회 실패 ({ticker}): {e}")

@@ -17,6 +17,18 @@ class BuyRecommendation:
 
 
 @dataclass
+class StockAnalysis:
+    """종목 분석 결과 데이터 구조"""
+    summary: str               # 기업 개요
+    recent_issues: str         # 최근 이슈
+    strengths: str             # 강점
+    risks: str                 # 리스크
+    opinion: str               # 종합 의견
+    one_liner: str             # 한줄 요약
+    ai_model: str              # 분석한 AI 모델명
+
+
+@dataclass
 class SellDecision:
     """매도/보유 판단 결과 데이터 구조"""
     action: str            # "매도" 또는 "보유"
@@ -36,6 +48,18 @@ class BaseAnalyzer(ABC):
         반환: BuyRecommendation 또는 추천 불가 시 None
         """
         pass
+
+    def analyze_stock(
+        self,
+        stock_name: str,
+        ticker: str,
+        current_price: int,
+    ) -> Optional[StockAnalysis]:
+        """
+        특정 종목에 대한 AI 분석.
+        기본 구현은 None을 반환합니다.
+        """
+        return None
 
     @abstractmethod
     def decide_sell(

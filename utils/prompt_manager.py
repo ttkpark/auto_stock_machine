@@ -31,6 +31,19 @@ DEFAULT_BUY_TEMPLATE = (
     '{"종목명": "삼성전자", "이유": "저평가 구간 진입"}'
 )
 
+DEFAULT_ASK_TEMPLATE = (
+    "당신은 한국 주식 전문가입니다.\n"
+    "{stock_name}({ticker}) 종목에 대해 분석해 주세요.\n"
+    "현재가: {current_price}원\n\n"
+    "다음 항목을 포함하여 간결하게 답변해 주세요:\n"
+    "1. 기업 개요 (한 줄)\n"
+    "2. 최근 이슈 및 시장 동향\n"
+    "3. 투자 매력도 (강점/리스크)\n"
+    "4. 종합 의견 (매수 추천 / 관망 / 주의)\n\n"
+    "답변은 반드시 아래 JSON 형식으로만 출력하세요. 다른 설명은 절대 하지 마세요.\n"
+    '{{"기업개요": "...", "최근이슈": "...", "강점": "...", "리스크": "...", "종합의견": "매수 추천", "한줄요약": "..."}}'
+)
+
 DEFAULT_SELL_TEMPLATE = (
     "당신은 한국 주식 전문가입니다.\n"
     "내가 보유한 {stock_name}({ticker}) 주식은 {qty}주이고, "
@@ -80,6 +93,7 @@ def load_prompts() -> dict:
             return {
                 "buy": data.get("buy", DEFAULT_BUY_TEMPLATE),
                 "sell": data.get("sell", DEFAULT_SELL_TEMPLATE),
+                "ask": data.get("ask", DEFAULT_ASK_TEMPLATE),
                 "budget": data.get("budget", DEFAULT_BUDGET_TEMPLATE),
             }
         except Exception:
@@ -87,6 +101,7 @@ def load_prompts() -> dict:
     return {
         "buy": DEFAULT_BUY_TEMPLATE,
         "sell": DEFAULT_SELL_TEMPLATE,
+        "ask": DEFAULT_ASK_TEMPLATE,
         "budget": DEFAULT_BUDGET_TEMPLATE,
     }
 
@@ -138,6 +153,18 @@ def build_buy_prompt(balance: int, market_info: str = "") -> str:
             "balance": f"{balance:,}",
             "budget_instruction": build_budget_instruction(),
             "market_info_line": market_info_line,
+        },
+    )
+
+
+def build_ask_prompt(stock_name: str, ticker: str, current_price: int) -> str:
+    template = load_prompts().get("ask", DEFAULT_ASK_TEMPLATE)
+    return _apply_template(
+        template,
+        {
+            "stock_name": stock_name,
+            "ticker": ticker,
+            "current_price": f"{current_price:,}",
         },
     )
 
