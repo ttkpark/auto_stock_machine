@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ssh -p 39332 -i \"$USERPROFILE/.ssh/id_ed25519_face\" server@211.221.184.17 \"cd ~/auto_stock_machine && cp .env ~/env_backup_auto_stock && cp -r data ~/data_backup_auto_stock 2>/dev/null; echo ''backup done''\")",
+      "Bash(ssh -p 39332 -i \"$USERPROFILE/.ssh/id_ed25519_face\" server@211.221.184.17 \"cd ~/auto_stock_machine && git init && git remote add origin https://github.com/ttkpark/auto_stock_machine.git && git fetch origin master && git reset --hard origin/master && echo ''git setup done''\")"
+    ]
+  }
+}

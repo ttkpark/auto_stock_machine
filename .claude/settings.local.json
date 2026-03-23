@@ -3,7 +3,14 @@
     "allow": [
       "Bash(git fetch:*)",
       "Bash(git pull:*)",
-      "Bash(.venv/Scripts/pip install:*)"
+      "Bash(.venv/Scripts/pip install:*)",
+      "Bash(ssh-keyscan -p 39332 -H 211.221.184.17)",
+      "Bash(ssh -p 39332 -i \"$USERPROFILE/.ssh/id_ed25519_face\" server@211.221.184.17 \"cd ~/auto_stock_machine && git pull && sudo systemctl restart auto-stock-machine-web && sudo systemctl status auto-stock-machine-web --no-pager -l\")",
+      "Bash(ssh -p 39332 -i \"$USERPROFILE/.ssh/id_ed25519_face\" server@211.221.184.17 \"ls -d ~/auto_stock_machine 2>/dev/null || echo ''NOT_FOUND''; find ~ -maxdepth 2 -name ''.git'' -type d 2>/dev/null\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''web_admin.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''web_admin.py OK''\\)\")",
+      "Bash(ssh -p 39332 -i \"$USERPROFILE/.ssh/id_ed25519_face\" server@211.221.184.17 \"ls ~ && find ~ -maxdepth 3 -name ''.git'' -type d 2>/dev/null\")",
+      "Bash(ls -la /c/Users/GH/Desktop/auto_stock_machine/*.py)",
+      "Bash(git push:*)"
     ]
   }
 }

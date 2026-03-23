@@ -13,37 +13,67 @@
     <div id="run-state" class="sub" style="margin-top:10px;"></div>
   </div>
 
+  <!-- 종목별 판단 요약 카드 -->
+  <div id="stock-cards"></div>
+
   <div class="card">
-    <h2>실시간 이벤트</h2>
+    <h2>실시간 이벤트 로그</h2>
+    <div style="margin-bottom:8px;">
+      <label class="sub"><input type="checkbox" id="show-raw" style="margin-right:4px;">원본 JSON 표시</label>
+    </div>
     <table>
       <thead>
         <tr>
-          <th>시간</th>
-          <th>모드</th>
-          <th>이벤트</th>
+          <th style="width:140px;">시간</th>
+          <th style="width:50px;">모드</th>
+          <th style="width:160px;">이벤트</th>
           <th>상세</th>
         </tr>
       </thead>
-      <tbody id="trace-body">
-      {% for row in traces[::-1] %}
-        <tr>
-          <td>{{ row.time }}</td>
-          <td>{{ row.mode }}</td>
-          <td><code>{{ row.event_type }}</code></td>
-          <td><code>{{ row.payload }}</code></td>
-        </tr>
-      {% endfor %}
-      </tbody>
+      <tbody id="trace-body"></tbody>
     </table>
   </div>
 
+  <style>
+    .stock-card { background:#fff; border-radius:10px; box-shadow:0 4px 20px rgba(0,0,0,0.08); padding:16px; margin-bottom:14px; }
+    .stock-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+    .stock-name { font-size:18px; font-weight:700; }
+    .badge { display:inline-block; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:700; }
+    .badge-sell { background:#fde9ec; color:#a40020; }
+    .badge-hold { background:#e8f8ee; color:#0a6b2d; }
+    .badge-crash { background:#ff4444; color:#fff; }
+    .badge-stop { background:#ff8800; color:#fff; }
+    .badge-trailing { background:#e65100; color:#fff; }
+    .indicator-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin-bottom:12px; }
+    .indicator-box { background:#f5f7fb; border-radius:8px; padding:10px; }
+    .indicator-label { font-size:11px; color:#5a6474; margin-bottom:2px; }
+    .indicator-value { font-size:16px; font-weight:700; }
+    .indicator-value.warn { color:#e65100; }
+    .indicator-value.danger { color:#a40020; }
+    .indicator-value.good { color:#0a6b2d; }
+    .ai-vote { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+    .ai-vote-item { background:#f5f7fb; border-radius:8px; padding:8px 12px; flex:1; min-width:180px; }
+    .ai-vote-model { font-weight:700; font-size:13px; }
+    .ai-vote-action { font-size:13px; margin-top:2px; }
+    .ai-vote-reason { font-size:12px; color:#5a6474; margin-top:4px; }
+    .context-block { background:#f9fbff; border-left:3px solid #1e66f5; padding:8px 12px; margin:8px 0; font-size:13px; white-space:pre-wrap; line-height:1.6; }
+    .event-tag { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:700; }
+    .event-tag.check { background:#eef3ff; color:#26419a; }
+    .event-tag.ai { background:#f3e8ff; color:#6b21a8; }
+    .event-tag.decision { background:#fef3c7; color:#92400e; }
+    .event-tag.order { background:#e8f8ee; color:#0a6b2d; }
+    .event-tag.stop { background:#fde9ec; color:#a40020; }
+    .event-tag.crash { background:#ff4444; color:#fff; }
+    pre.payload { background:#f2f4f9; border-radius:6px; padding:8px; font-size:12px; overflow-x:auto; white-space:pre-wrap; max-height:300px; margin:0; }
+  </style>
+
   <script>
     let activeRunId = "{{ state.run_id }}";
+    let lastTraces = [];
 
     async function startAction(action) {
       const body = new URLSearchParams();
       body.set("action", action);
-
       const resp = await fetch("/api/ai/run", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -58,23 +88,191 @@
       await refreshState();
     }
 
-    function formatPayload(payload) {
-      try {
-        return JSON.stringify(payload, null, 2);
-      } catch (e) {
-        return String(payload || "");
+    /* ── 이벤트 유형별 태그 ── */
+    const EVENT_STYLES = {
+      sell_holding_checked: { cls: "check", label: "종목 검토" },
+      sell_ai_decision: { cls: "ai", label: "AI 판단" },
+      sell_final_decision: { cls: "decision", label: "최종 결정" },
+      sell_order_result: { cls: "order", label: "매도 주문" },
+      sell_hold: { cls: "check", label: "보유 유지" },
+      sell_stop_loss: { cls: "stop", label: "고정 손절" },
+      sell_trailing_stop: { cls: "stop", label: "동적 손절" },
+      sell_market_crash: { cls: "crash", label: "시장 급락" },
+      buy_recommendation: { cls: "ai", label: "AI 추천" },
+      buy_consensus_result: { cls: "decision", label: "매수 합의" },
+      buy_order_result: { cls: "order", label: "매수 주문" },
+    };
+
+    function eventTag(eventType) {
+      const s = EVENT_STYLES[eventType];
+      if (s) return `<span class="event-tag ${s.cls}">${s.label}</span> <code>${eventType}</code>`;
+      return `<code>${eventType}</code>`;
+    }
+
+    /* ── payload 요약 (사람이 읽기 쉽게) ── */
+    function summarizePayload(eventType, p) {
+      if (!p || typeof p !== "object") return "";
+      const lines = [];
+      switch (eventType) {
+        case "sell_holding_checked":
+          lines.push(`<b>${p.stock_name || ""}</b> (${p.ticker || ""}) ${p.qty || 0}주`);
+          lines.push(`평단가 ${num(p.avg_price)} → 현재가 ${num(p.current_price)} | 수익률 <b class="${profitCls(p.profit_rate)}">${pct(p.profit_rate)}</b>`);
+          if (p.holding_days != null) lines.push(`보유 ${p.holding_days}일 | 트레일링 하이 ${num(p.trailing_high)}`);
+          if (p.enriched_context) lines.push(`<div class="context-block">${esc(p.enriched_context)}</div>`);
+          break;
+        case "sell_ai_decision":
+          lines.push(`<b>[${p.ai_model}]</b> ${p.stock_name} → <b class="${p.action==='매도'?'bad':'ok'}">${p.action}</b>`);
+          lines.push(`사유: ${esc(p.reason)}`);
+          break;
+        case "sell_final_decision":
+          lines.push(`<b>${p.stock_name}</b> 최종 → <b class="${p.action==='매도'?'bad':'ok'}">${p.action}</b>`);
+          if (p.reason) lines.push(`사유: ${esc(p.reason)}`);
+          if (p.holding_days != null) lines.push(`보유 ${p.holding_days}일 | 수익률 ${pct(p.profit_rate)}`);
+          break;
+        case "sell_order_result":
+          lines.push(`${p.stock_name} (${p.ticker}) ${p.qty}주 매도 ${p.success ? '<b class="ok">성공</b>' : '<b class="bad">실패</b>'}`);
+          if (p.reason) lines.push(`사유: ${esc(p.reason)}`);
+          break;
+        case "sell_hold":
+          lines.push(`<b>${p.stock_name}</b> 보유 유지 | 수익률 ${pct(p.profit_rate)}`);
+          if (p.reason) lines.push(`사유: ${esc(p.reason)}`);
+          break;
+        case "sell_stop_loss":
+          lines.push(`<b class="bad">[고정 손절]</b> ${p.stock_name} ${p.qty}주 | 수익률 ${pct(p.profit_rate)} | ${p.success ? '성공' : '실패'}`);
+          break;
+        case "sell_trailing_stop":
+          lines.push(`<b class="bad">[동적 손절]</b> ${p.stock_name} ${p.qty}주 | 수익률 ${pct(p.profit_rate)}`);
+          lines.push(`트레일링 하이 ${num(p.trailing_high)} → 손절라인 ${num(p.dynamic_stop)} (ATR ${num(p.atr)})`);
+          break;
+        case "sell_market_crash":
+          lines.push(`<b class="bad">[시장 급락 방어]</b> ${p.stock_name} ${p.qty}주 | ${p.success ? '매도 성공' : '매도 실패'}`);
+          if (p.crash_info) lines.push(esc(p.crash_info));
+          break;
+        case "sell_holdings_loaded":
+          lines.push(`보유 종목 ${p.count}개 로드`);
+          break;
+        case "buy_recommendation":
+          lines.push(`<b>[${p.ai_model}]</b> 추천: <b>${p.stock_name || ""}</b>`);
+          if (p.reason) lines.push(`사유: ${esc(p.reason)}`);
+          break;
+        case "buy_order_result":
+          lines.push(`${p.stock_name} (${p.ticker}) ${p.qty}주 @ ${num(p.current_price)} ${p.success ? '<b class="ok">매수 성공</b>' : '<b class="bad">매수 실패</b>'}`);
+          break;
+        default:
+          return `<pre class="payload">${esc(JSON.stringify(p, null, 2))}</pre>`;
+      }
+      return lines.join("<br>");
+    }
+
+    function num(v) { return v != null ? Number(v).toLocaleString() + "원" : "-"; }
+    function pct(v) { return v != null ? (v >= 0 ? "+" : "") + Number(v).toFixed(1) + "%" : "-"; }
+    function profitCls(v) { return v >= 0 ? "ok" : "bad"; }
+    function esc(s) { const d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
+
+    /* ── 종목별 판단 요약 카드 빌드 ── */
+    function buildStockCards(traces) {
+      const container = document.getElementById("stock-cards");
+      container.innerHTML = "";
+
+      // sell 모드 traces만 추출, 종목별로 그룹
+      const sellTraces = traces.filter(t => t.mode === "sell");
+      if (sellTraces.length === 0) return;
+
+      const stocks = {};
+      for (const t of sellTraces) {
+        const p = t.payload || {};
+        const ticker = p.ticker;
+        if (!ticker) continue;
+        if (!stocks[ticker]) stocks[ticker] = { name: p.stock_name || ticker, ticker, events: [] };
+        stocks[ticker].events.push(t);
+      }
+
+      for (const [ticker, data] of Object.entries(stocks)) {
+        const card = document.createElement("div");
+        card.className = "stock-card";
+
+        // 기본 데이터 추출
+        const checked = data.events.find(e => e.event_type === "sell_holding_checked");
+        const aiDecisions = data.events.filter(e => e.event_type === "sell_ai_decision");
+        const finalDec = data.events.find(e => e.event_type === "sell_final_decision");
+        const stopLoss = data.events.find(e => e.event_type === "sell_stop_loss");
+        const trailingStop = data.events.find(e => e.event_type === "sell_trailing_stop");
+        const crashSell = data.events.find(e => e.event_type === "sell_market_crash");
+        const holdEvent = data.events.find(e => e.event_type === "sell_hold");
+
+        const cp = checked?.payload || {};
+        const profitRate = cp.profit_rate;
+
+        // 결과 배지
+        let badge = "";
+        if (crashSell) badge = `<span class="badge badge-crash">시장급락 매도</span>`;
+        else if (trailingStop) badge = `<span class="badge badge-trailing">동적 손절</span>`;
+        else if (stopLoss) badge = `<span class="badge badge-stop">고정 손절</span>`;
+        else if (finalDec?.payload?.action === "매도") badge = `<span class="badge badge-sell">AI 매도</span>`;
+        else if (finalDec?.payload?.action === "보유" || holdEvent) badge = `<span class="badge badge-hold">보유 유지</span>`;
+
+        // 헤더
+        card.innerHTML = `<div class="stock-header">
+          <div><span class="stock-name">${esc(data.name)}</span> <span class="sub">(${ticker})</span></div>
+          <div>${badge}</div>
+        </div>`;
+
+        // 지표 그리드
+        if (checked) {
+          let indicatorHtml = `<div class="indicator-grid">`;
+          indicatorHtml += `<div class="indicator-box"><div class="indicator-label">수익률</div><div class="indicator-value ${profitCls(profitRate)}">${pct(profitRate)}</div></div>`;
+          indicatorHtml += `<div class="indicator-box"><div class="indicator-label">현재가 / 평단가</div><div class="indicator-value">${num(cp.current_price)} / ${num(cp.avg_price)}</div></div>`;
+          indicatorHtml += `<div class="indicator-box"><div class="indicator-label">수량</div><div class="indicator-value">${cp.qty || 0}주</div></div>`;
+          if (cp.holding_days != null) {
+            const dCls = cp.holding_days >= 30 ? "warn" : "";
+            indicatorHtml += `<div class="indicator-box"><div class="indicator-label">보유 기간</div><div class="indicator-value ${dCls}">${cp.holding_days}일</div></div>`;
+          }
+          if (cp.trailing_high) {
+            indicatorHtml += `<div class="indicator-box"><div class="indicator-label">트레일링 하이</div><div class="indicator-value">${num(cp.trailing_high)}</div></div>`;
+          }
+          indicatorHtml += `</div>`;
+          card.innerHTML += indicatorHtml;
+
+          // enriched context (기술 지표 블록)
+          if (cp.enriched_context) {
+            card.innerHTML += `<div class="context-block">${esc(cp.enriched_context)}</div>`;
+          }
+        }
+
+        // AI 투표 결과
+        if (aiDecisions.length > 0) {
+          let voteHtml = `<div style="margin-top:10px;"><b style="font-size:13px;">AI 투표</b></div><div class="ai-vote">`;
+          for (const d of aiDecisions) {
+            const dp = d.payload || {};
+            const actionCls = dp.action === "매도" ? "bad" : "ok";
+            voteHtml += `<div class="ai-vote-item">
+              <div class="ai-vote-model">${esc(dp.ai_model)}</div>
+              <div class="ai-vote-action"><b class="${actionCls}">${dp.action}</b></div>
+              <div class="ai-vote-reason">${esc(dp.reason)}</div>
+            </div>`;
+          }
+          voteHtml += `</div>`;
+          card.innerHTML += voteHtml;
+        }
+
+        // 최종 결정
+        if (finalDec) {
+          const fp = finalDec.payload || {};
+          const actionCls = fp.action === "매도" ? "bad" : "ok";
+          card.innerHTML += `<div style="margin-top:10px;padding:8px 12px;background:#f5f7fb;border-radius:8px;">
+            <b>최종 결정:</b> <b class="${actionCls}">${fp.action}</b> — ${esc(fp.reason)}
+          </div>`;
+        }
+
+        container.appendChild(card);
       }
     }
 
+    /* ── 렌더링 ── */
     function renderState(state) {
       const el = document.getElementById("run-state");
       const runningText = state.running ? "실행 중" : "대기";
-      const mode = state.mode || "-";
-      const runId = state.run_id || "-";
-      const startedAt = state.started_at || "-";
-      const finishedAt = state.finished_at || "-";
-      el.textContent = `상태: ${runningText} | 모드: ${mode} | run_id: ${runId} | 시작: ${startedAt} | 종료: ${finishedAt}`;
-
+      el.textContent = `상태: ${runningText} | 모드: ${state.mode || "-"} | run_id: ${state.run_id || "-"} | 시작: ${state.started_at || "-"} | 종료: ${state.finished_at || "-"}`;
       const disabled = !!state.running;
       document.getElementById("btn-buy").disabled = disabled;
       document.getElementById("btn-sell").disabled = disabled;
@@ -82,46 +280,34 @@
     }
 
     function renderTraces(traces) {
+      lastTraces = traces;
       const body = document.getElementById("trace-body");
       body.innerHTML = "";
+      const showRaw = document.getElementById("show-raw").checked;
       const rows = traces.slice().reverse();
       for (const row of rows) {
         const tr = document.createElement("tr");
-
-        const tdTime = document.createElement("td");
-        tdTime.textContent = row.time || "";
-        tr.appendChild(tdTime);
-
-        const tdMode = document.createElement("td");
-        tdMode.textContent = row.mode || "";
-        tr.appendChild(tdMode);
-
-        const tdEvent = document.createElement("td");
-        const eventCode = document.createElement("code");
-        eventCode.textContent = row.event_type || "";
-        tdEvent.appendChild(eventCode);
-        tr.appendChild(tdEvent);
-
-        const tdPayload = document.createElement("td");
-        const payloadCode = document.createElement("code");
-        payloadCode.textContent = formatPayload(row.payload || {});
-        tdPayload.appendChild(payloadCode);
-        tr.appendChild(tdPayload);
-
+        tr.innerHTML = `
+          <td>${row.time || ""}</td>
+          <td>${row.mode || ""}</td>
+          <td>${eventTag(row.event_type)}</td>
+          <td>${showRaw
+            ? `<pre class="payload">${esc(JSON.stringify(row.payload || {}, null, 2))}</pre>`
+            : summarizePayload(row.event_type, row.payload)
+          }</td>`;
         body.appendChild(tr);
       }
+
+      // 종목별 카드도 갱신
+      buildStockCards(traces);
     }
 
     async function refreshState() {
       const runQuery = activeRunId ? `?run_id=${encodeURIComponent(activeRunId)}` : "";
       const resp = await fetch(`/api/ai/state${runQuery}`);
-      if (!resp.ok) {
-        return;
-      }
+      if (!resp.ok) return;
       const data = await resp.json();
-      if (data.active_run_id) {
-        activeRunId = data.active_run_id;
-      }
+      if (data.active_run_id) activeRunId = data.active_run_id;
       renderState(data.state || {});
       renderTraces(data.traces || []);
     }
@@ -129,6 +315,7 @@
     document.getElementById("btn-buy").addEventListener("click", () => startAction("buy"));
     document.getElementById("btn-sell").addEventListener("click", () => startAction("sell"));
     document.getElementById("btn-status").addEventListener("click", () => startAction("status"));
+    document.getElementById("show-raw").addEventListener("change", () => renderTraces(lastTraces));
 
     refreshState();
     setInterval(refreshState, 2000);
