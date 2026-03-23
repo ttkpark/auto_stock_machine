@@ -7,6 +7,9 @@
   .model-custom { display: none; margin-top: 6px; width: 100%; padding: 8px; border: 1px solid #f0a000; border-radius: 6px; font-size: 13px; box-sizing: border-box; }
   .model-custom.visible { display: block; }
   .model-badge { font-size: 11px; background: #eef3ff; color: #26419a; border-radius: 4px; padding: 1px 6px; margin-left: 4px; vertical-align: middle; }
+  .model-loading { font-size: 11px; color: #1e66f5; margin-left: 6px; }
+  .model-count { font-size: 11px; color: #0a7f39; margin-left: 6px; }
+  .model-error { font-size: 11px; color: #b1002b; margin-left: 6px; }
 </style>
 
 <div class="card">
@@ -26,7 +29,10 @@
         <tr>
           <td>
             <strong>{{ key }}</strong>
-            {% if key in model_options %}<span class="model-badge">모델선택</span>{% endif %}
+            {% if key in model_options %}
+              <span class="model-badge">모델선택</span>
+              <span class="model-loading" id="status-{{ key }}">불러오는 중...</span>
+            {% endif %}
           </td>
           <td>
             {% if key == "IS_REAL_TRADING" %}
@@ -75,8 +81,8 @@
 
 <script>
 function toggleCustomInput(key, value) {
-  const customEl = document.getElementById('custom-' + key);
-  const hiddenEl = document.getElementById('hidden-' + key);
+  var customEl = document.getElementById('custom-' + key);
+  var hiddenEl = document.getElementById('hidden-' + key);
   if (value === '__custom__') {
     customEl.classList.add('visible');
     customEl.focus();
@@ -91,15 +97,94 @@ function syncHidden(key, value) {
   document.getElementById('hidden-' + key).value = value;
 }
 
-// 페이지 로드 시 hidden 값 초기화
-document.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('[id^="sel-"]').forEach(sel => {
-    const key = sel.id.replace('sel-', '');
-    const hidden = document.getElementById('hidden-' + key);
+// 페이지 로드 시 API에서 실제 모델 목록을 가져와 드롭다운 갱신
+document.addEventListener('DOMContentLoaded', function() {
+  // hidden 값 초기화
+  document.querySelectorAll('[id^="sel-"]').forEach(function(sel) {
+    var key = sel.id.replace('sel-', '');
+    var hidden = document.getElementById('hidden-' + key);
     if (sel.value !== '__custom__') {
       hidden.value = sel.value;
     }
   });
+
+  // 실제 모델 목록 비동기 로드
+  fetch('/api/available-models')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var modelKeys = ['CLAUDE_MODEL_NAME', 'OPENAI_MODEL_NAME', 'GEMINI_MODEL_NAME'];
+      modelKeys.forEach(function(key) {
+        var models = data[key];
+        var statusEl = document.getElementById('status-' + key);
+        var selEl = document.getElementById('sel-' + key);
+        var hiddenEl = document.getElementById('hidden-' + key);
+        var customEl = document.getElementById('custom-' + key);
+
+        if (!selEl || !statusEl) return;
+
+        if (!models || models.length === 0) {
+          statusEl.className = 'model-error';
+          statusEl.textContent = '(API 키 미설정 또는 조회 실패)';
+          return;
+        }
+
+        // 현재 선택된 값 보존
+        var currentValue = hiddenEl ? hiddenEl.value : '';
+        var wasCustom = selEl.value === '__custom__';
+
+        // 드롭다운 옵션 교체
+        selEl.innerHTML = '';
+        var currentFound = false;
+        models.forEach(function(m) {
+          var opt = document.createElement('option');
+          opt.value = m;
+          opt.textContent = m;
+          if (m === currentValue) {
+            opt.selected = true;
+            currentFound = true;
+          }
+          selEl.appendChild(opt);
+        });
+
+        // 직접 입력 옵션 추가
+        var customOpt = document.createElement('option');
+        customOpt.value = '__custom__';
+        customOpt.textContent = '직접 입력...';
+        if (wasCustom || (currentValue && !currentFound)) {
+          customOpt.selected = true;
+          if (customEl) {
+            customEl.classList.add('visible');
+            customEl.value = currentValue;
+          }
+        }
+        selEl.appendChild(customOpt);
+
+        // hidden 값 유지
+        if (!wasCustom && currentFound) {
+          hiddenEl.value = currentValue;
+        } else if (!wasCustom && !currentFound && models.length > 0) {
+          // 현재 값이 목록에 없으면 직접입력으로 전환
+          customOpt.selected = true;
+          if (customEl) {
+            customEl.classList.add('visible');
+            customEl.value = currentValue;
+          }
+          hiddenEl.value = currentValue;
+        }
+
+        statusEl.className = 'model-count';
+        statusEl.textContent = '(' + models.length + '개 모델 확인)';
+      });
+    })
+    .catch(function(err) {
+      ['CLAUDE_MODEL_NAME', 'OPENAI_MODEL_NAME', 'GEMINI_MODEL_NAME'].forEach(function(key) {
+        var statusEl = document.getElementById('status-' + key);
+        if (statusEl) {
+          statusEl.className = 'model-error';
+          statusEl.textContent = '(조회 실패)';
+        }
+      });
+    });
 });
 </script>
 {% endblock %}

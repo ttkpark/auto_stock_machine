@@ -489,6 +489,95 @@ def _check_all_ai_usage() -> Dict[str, Any]:
     return {"providers": providers, "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
 
+# ── 동적 모델 목록 조회 ─────────────────────────────────────
+
+
+def _fetch_anthropic_models() -> List[str]:
+    """Anthropic API에서 사용 가능한 모델 목록을 가져옵니다."""
+    import requests as req
+
+    key = os.environ.get("CLAUDE_API_KEY", "")
+    if not key:
+        return []
+    try:
+        resp = req.get(
+            "https://api.anthropic.com/v1/models?limit=100",
+            headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+        models = [m["id"] for m in data.get("data", []) if m.get("id")]
+        # claude 모델만 필터, 정렬 (최신순)
+        models = sorted([m for m in models if "claude" in m], reverse=True)
+        return models
+    except Exception:
+        return []
+
+
+def _fetch_openai_models() -> List[str]:
+    """OpenAI API에서 사용 가능한 GPT 모델 목록을 가져옵니다."""
+    import requests as req
+
+    key = os.environ.get("OPENAI_API_KEY", "")
+    if not key:
+        return []
+    try:
+        resp = req.get(
+            "https://api.openai.com/v1/models",
+            headers={"Authorization": f"Bearer {key}"},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+        models = [m["id"] for m in data.get("data", []) if m.get("id")]
+        # gpt 모델만 필터, 정렬
+        models = sorted([m for m in models if m.startswith("gpt")], reverse=True)
+        return models
+    except Exception:
+        return []
+
+
+def _fetch_gemini_models() -> List[str]:
+    """Google Gemini API에서 사용 가능한 모델 목록을 가져옵니다."""
+    import requests as req
+
+    key = os.environ.get("GEMINI_API_KEY", "")
+    if not key:
+        return []
+    try:
+        resp = req.get(
+            f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+        models = []
+        for m in data.get("models", []):
+            name = m.get("name", "")  # "models/gemini-2.0-flash"
+            if name.startswith("models/"):
+                name = name[len("models/"):]
+            # generateContent 를 지원하는 모델만
+            methods = m.get("supportedGenerationMethods", [])
+            if "generateContent" in methods and "gemini" in name:
+                models.append(name)
+        return sorted(models, reverse=True)
+    except Exception:
+        return []
+
+
+def _fetch_all_available_models() -> Dict[str, List[str]]:
+    """모든 AI 제공자에서 사용 가능한 모델 목록을 가져옵니다."""
+    return {
+        "CLAUDE_MODEL_NAME": _fetch_anthropic_models(),
+        "OPENAI_MODEL_NAME": _fetch_openai_models(),
+        "GEMINI_MODEL_NAME": _fetch_gemini_models(),
+    }
+
+
 def _read_bool_env(key: str, default: bool = False) -> bool:
     return os.environ.get(key, str(default)).lower() == "true"
 
@@ -870,6 +959,11 @@ def create_app() -> Flask:
     @_login_required
     def api_ai_usage():
         return jsonify(_check_all_ai_usage())
+
+    @app.get("/api/available-models")
+    @_login_required
+    def api_available_models():
+        return jsonify(_fetch_all_available_models())
 
     @app.get("/schedule")
     @_login_required
