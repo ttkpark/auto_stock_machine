@@ -381,6 +381,17 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
 
         final_decision = decision_maker.decide_sell_by_vote(decisions)
         logger.info(f"최종 결정: {name} → {final_decision.action}")
+
+        # 개별 AI 판단 요약 (텔레그램 + trace 공용)
+        valid_decisions = [d for d in decisions if not d.is_error]
+        error_decisions = [d for d in decisions if d.is_error]
+        vote_lines = []
+        for d in valid_decisions:
+            vote_lines.append(f"  {d.ai_model}: {d.action} - {d.reason[:60]}")
+        for d in error_decisions:
+            vote_lines.append(f"  {d.ai_model}: ⚠️ 오류 (투표 제외)")
+        vote_summary = "\n".join(vote_lines)
+
         trace.record(
             "sell_final_decision",
             stock_name=name, ticker=ticker,
@@ -388,13 +399,21 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
             reason=final_decision.reason,
             profit_rate=profit_rate,
             holding_days=holding_days,
+            valid_votes=len(valid_decisions),
+            error_votes=len(error_decisions),
         )
 
         if final_decision.action == "매도":
             success = broker.sell_order(ticker=ticker, qty=qty)
             if success:
                 notifier.notify_sell_order(name, ticker, qty, avg_price, current_price)
-                notifier.send(f"[매도 이유] {final_decision.reason}")
+                days_text = f" | {holding_days}일 보유" if holding_days else ""
+                notifier.send(
+                    f"[AI 판단: 매도] {name} ({ticker})\n"
+                    f"수익률 {profit_rate:+.1f}%{days_text}\n"
+                    f"{vote_summary}\n"
+                    f"사유: {final_decision.reason}"
+                )
                 tracker.record_sell(ticker)
             trace.record(
                 "sell_order_result",
@@ -402,6 +421,13 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
                 success=success, reason=final_decision.reason,
             )
         else:
+            # 보유 결정도 텔레그램 알림 전송
+            days_text = f" | {holding_days}일 보유" if holding_days else ""
+            notifier.send(
+                f"[AI 판단: 보유] {name} ({ticker})\n"
+                f"수익률 {profit_rate:+.1f}%{days_text}\n"
+                f"{vote_summary}"
+            )
             trace.record(
                 "sell_hold",
                 stock_name=name, ticker=ticker,
