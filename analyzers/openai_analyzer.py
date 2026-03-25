@@ -110,7 +110,7 @@ class OpenAIAnalyzer(BaseAnalyzer):
             parsed = self._parse_json(raw_text)
             if not parsed:
                 logger.warning(f"[OpenAIAnalyzer] 매도 판단 JSON 파싱 실패: {raw_text}")
-                return SellDecision(action="보유", reason="파싱 오류 - 안전을 위해 보유", ai_model="ChatGPT")
+                return SellDecision(action="보유", reason="파싱 오류 - 안전을 위해 보유", ai_model="ChatGPT", is_error=True)
 
             return SellDecision(
                 action=parsed.get("결정", "보유"),
@@ -119,7 +119,7 @@ class OpenAIAnalyzer(BaseAnalyzer):
             )
         except Exception as e:
             logger.error(f"[OpenAIAnalyzer] 매도 판단 오류: {e}")
-            return SellDecision(action="보유", reason=f"API 오류: {e}", ai_model="ChatGPT")
+            return SellDecision(action="보유", reason=f"API 오류: {e}", ai_model="ChatGPT", is_error=True)
 
     @staticmethod
     def _parse_json(text: str) -> Optional[dict]:

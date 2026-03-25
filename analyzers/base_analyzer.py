@@ -34,6 +34,7 @@ class SellDecision:
     action: str            # "매도" 또는 "보유"
     reason: str            # 판단 이유
     ai_model: str          # 판단한 AI 모델명
+    is_error: bool = False # API 오류 등으로 정상 판단이 아닌 경우 True
 
 
 class BaseAnalyzer(ABC):

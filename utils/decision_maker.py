@@ -84,27 +84,43 @@ class DecisionMaker:
     def decide_sell_by_vote(self, decisions: list[SellDecision]) -> SellDecision:
         """
         AI 판단 목록에서 다수결로 매도/보유를 결정합니다.
+        API 오류(is_error=True) 응답은 투표에서 제외합니다.
 
         반환: 최종 SellDecision
         """
         if not decisions:
             return SellDecision(action="보유", reason="판단 결과 없음", ai_model="System")
 
-        action_counter = Counter(d.action for d in decisions)
+        # 에러 응답 제외, 정상 응답만 투표에 반영
+        valid = [d for d in decisions if not d.is_error]
+        errors = [d for d in decisions if d.is_error]
+
+        if errors:
+            error_models = [d.ai_model for d in errors]
+            logger.warning(f"[DecisionMaker] AI 오류로 투표 제외: {error_models}")
+
+        if not valid:
+            logger.warning("[DecisionMaker] 정상 응답한 AI가 없어 안전을 위해 보유 결정")
+            return SellDecision(action="보유", reason="전체 AI 응답 오류 - 안전을 위해 보유", ai_model="System")
+
+        action_counter = Counter(d.action for d in valid)
         sell_count = action_counter.get("매도", 0)
         hold_count = action_counter.get("보유", 0)
 
-        logger.info(f"[DecisionMaker] 매도 판단 집계: 매도={sell_count}, 보유={hold_count}")
+        logger.info(
+            f"[DecisionMaker] 매도 판단 집계: 매도={sell_count}, 보유={hold_count}"
+            f" (유효 {len(valid)}표, 오류 제외 {len(errors)}표)"
+        )
 
         if sell_count > hold_count:
-            reasons = [d.reason for d in decisions if d.action == "매도"]
+            reasons = [d.reason for d in valid if d.action == "매도"]
             return SellDecision(
                 action="매도",
                 reason=" / ".join(reasons),
                 ai_model="Consensus",
             )
         else:
-            reasons = [d.reason for d in decisions if d.action == "보유"]
+            reasons = [d.reason for d in valid if d.action == "보유"]
             return SellDecision(
                 action="보유",
                 reason=" / ".join(reasons) if reasons else "과반 보유 의견",
