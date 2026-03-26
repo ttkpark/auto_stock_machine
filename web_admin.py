@@ -164,7 +164,7 @@ def _save_env_values(new_values: Dict[str, str]) -> None:
 
 
 def _is_logged_in() -> bool:
-    return bool(session.get("user_id"))
+    return "user_id" in session
 
 
 def _login_required(func):
@@ -859,8 +859,8 @@ def create_app() -> Flask:
             return redirect(url_for("login_page"))
 
         session.permanent = True
-        session["user_id"] = 0
-        session["username"] = "admin"
+        session["user_id"] = 1  # DB가 없어도 admin=1로 간주
+        session["username"] = username or "admin"
         session["is_admin"] = True
         return redirect(url_for("dashboard"))
 
