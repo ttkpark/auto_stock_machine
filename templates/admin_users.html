@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% set active_page = "admin_users" %}
+{% block content %}
+<div class="card">
+  <h2>사용자 관리</h2>
+  <table>
+    <thead>
+      <tr><th>ID</th><th>사용자명</th><th>표시 이름</th><th>관리자</th><th>상태</th><th>생성일</th><th>액션</th></tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td>{{ u.id }}</td>
+        <td>{{ u.username }}</td>
+        <td>{{ u.display_name }}</td>
+        <td>{{ "Y" if u.is_admin else "N" }}</td>
+        <td>{{ "활성" if u.is_active else "비활성" }}</td>
+        <td>{{ u.created_at }}</td>
+        <td style="white-space: nowrap;">
+          <form method="post" action="/admin/users/{{ u.id }}/toggle" style="display:inline;">
+            <button class="btn btn-gray" type="submit" style="padding:4px 8px; font-size:12px;">
+              {{ "비활성화" if u.is_active else "활성화" }}
+            </button>
+          </form>
+          <form method="post" action="/admin/users/{{ u.id }}/reset-password" style="display:inline;">
+            <input name="new_password" type="password" placeholder="새 비밀번호" style="width:100px; padding:3px 6px; font-size:12px;">
+            <button class="btn btn-gray" type="submit" style="padding:4px 8px; font-size:12px;">변경</button>
+          </form>
+          {% if u.id != current_user_id %}
+          <form method="post" action="/admin/users/{{ u.id }}/delete" style="display:inline;"
+                onsubmit="return confirm('정말 삭제하시겠습니까?')">
+            <button class="btn btn-danger" type="submit" style="padding:4px 8px; font-size:12px;">삭제</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>새 사용자 추가</h2>
+  <form method="post" action="/admin/users/create" style="display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
+    <div>
+      <label style="font-size:13px;">사용자명</label>
+      <input name="username" type="text" required style="padding:8px; width:140px;">
+    </div>
+    <div>
+      <label style="font-size:13px;">비밀번호</label>
+      <input name="password" type="password" required style="padding:8px; width:140px;">
+    </div>
+    <div>
+      <label style="font-size:13px;">표시 이름</label>
+      <input name="display_name" type="text" style="padding:8px; width:140px;">
+    </div>
+    <div style="display:flex; align-items:center; gap:4px;">
+      <input name="is_admin" type="checkbox" id="is_admin">
+      <label for="is_admin" style="font-size:13px;">관리자</label>
+    </div>
+    <button class="btn btn-primary" type="submit">추가</button>
+  </form>
+</div>
+{% endblock %}

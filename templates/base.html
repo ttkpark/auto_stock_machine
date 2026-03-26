@@ -44,7 +44,10 @@
           <h1>Auto Stock Dashboard</h1>
           <div class="sub">자동매매 상태/설정/실행을 웹에서 통합 관리</div>
         </div>
-        <div><a href="/logout">로그아웃</a></div>
+        <div style="text-align: right; font-size: 13px;">
+          <span style="color: #5a6474;">{{ current_username }}</span>
+          <a href="/logout" style="margin-left: 8px;">로그아웃</a>
+        </div>
       </div>
       <div class="nav" style="margin-top: 12px;">
         <a class="{% if active_page == 'dashboard' %}active{% endif %}" href="/">대시보드</a>
@@ -55,6 +58,7 @@
         <a class="{% if active_page == 'ai' %}active{% endif %}" href="/ai">AI 상세</a>
         <a class="{% if active_page == 'prompts' %}active{% endif %}" href="/prompts">프롬프트</a>
         <a class="{% if active_page == 'server' %}active{% endif %}" href="/server">서버상태</a>
+        {% if current_is_admin %}<a class="{% if active_page == 'admin_users' %}active{% endif %}" href="/admin/users">사용자관리</a>{% endif %}
       </div>
     </div>
 
