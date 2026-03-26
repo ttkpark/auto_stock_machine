@@ -370,6 +370,12 @@ def update_user(user_id: int, **fields) -> None:
 
 def delete_user(user_id: int) -> None:
     with get_db() as conn:
+        # CASCADE가 작동하지 않을 수 있으므로 관련 데이터를 먼저 삭제
+        for table in (
+            "user_config", "ai_traces", "action_history", "holdings_tracker",
+            "schedule_config", "telegram_subscribers", "user_prompts", "token_cache",
+        ):
+            conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
 
