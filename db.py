@@ -378,13 +378,9 @@ def delete_user(user_id: int) -> None:
 # ------------------------------------------------------------------
 
 def get_user_config(user_id: int) -> dict[str, str]:
-    """시스템 기본값 + 사용자 오버라이드를 병합하여 반환."""
-    # 기본값: 현재 환경 변수
-    merged = {}
-    for key in MANAGED_USER_KEYS:
-        merged[key] = os.environ.get(key, "")
+    """사용자가 DB에 저장한 설정만 반환합니다. 없는 키는 빈 문자열."""
+    merged = {key: "" for key in MANAGED_USER_KEYS}
 
-    # 사용자 오버라이드
     with get_db() as conn:
         rows = conn.execute(
             "SELECT key, value FROM user_config WHERE user_id = ?", (user_id,)
