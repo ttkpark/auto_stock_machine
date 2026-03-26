@@ -131,9 +131,9 @@ class MockBroker(BaseBroker):
     #  계좌 정보
     # ------------------------------------------------------------------ #
     def get_balance(self) -> int:
-        url = f"{self.BASE_URL}/uapi/domestic-stock/v1/trading/inquire-psbl-order"
+        url = f"{self.BASE_URL}/uapi/domestic-stock/v1/trading/inquire-balance"
         headers = self._headers()
-        headers["tr_id"] = "VTTC8908R"  # 모의투자 주문 가능 금액 조회
+        headers["tr_id"] = "VTTC8434R"  # 모의투자 잔고 조회
 
         account_prefix = self.account_number[:8]
         account_suffix = self.account_number[8:]
@@ -141,30 +141,29 @@ class MockBroker(BaseBroker):
         params = {
             "CANO": account_prefix,
             "ACNT_PRDT_CD": account_suffix,
-            "PDNO": "005930",
-            "ORD_UNPR": "0",
-            "ORD_DVSN": "01",
-            "CMA_EVLU_AMT_ICLD_YN": "N",
-            "OVRS_ICLD_YN": "N",
+            "AFHR_FLPR_YN": "N",
+            "OFL_YN": "",
+            "INQR_DVSN": "02",
+            "UNPR_DVSN": "01",
+            "FUND_STTL_ICLD_YN": "N",
+            "FNCG_AMT_AUTO_RDPT_YN": "N",
+            "PRCS_DVSN": "01",
+            "CTX_AREA_FK100": "",
+            "CTX_AREA_NK100": "",
         }
         resp = requests.get(url, headers=headers, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
-        if not self._validate_response(data, "주문 가능 예수금 조회"):
+        if not self._validate_response(data, "잔고 조회 (예수금)"):
             return 0
 
-        output = data.get("output")
-        if not isinstance(output, dict):
-            logger.error(f"[MockBroker] 주문 가능 예수금 조회 응답 형식 오류: output 누락 | raw={data}")
+        output2 = data.get("output2")
+        if not isinstance(output2, list) or not output2:
+            logger.error(f"[MockBroker] 잔고 조회 output2 누락 | raw={data}")
             return 0
 
-        ord_psbl_cash = output.get("ord_psbl_cash")
-        if ord_psbl_cash is None:
-            logger.error(f"[MockBroker] 주문 가능 예수금 조회 응답 오류: ord_psbl_cash 누락 | raw={data}")
-            return 0
-
-        balance = int(float(ord_psbl_cash))
-        logger.info(f"[MockBroker] 주문 가능 예수금: {balance:,}원")
+        balance = int(float(output2[0].get("dnca_tot_amt", 0)))
+        logger.info(f"[MockBroker] 예수금총금액: {balance:,}원")
         return balance
 
     def get_holdings(self) -> list[dict]:

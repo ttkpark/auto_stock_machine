@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 import config as _cfg
 
 from dotenv import load_dotenv
-from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, flash, g, jsonify, redirect, render_template, request, session, url_for
 
 from bot_service import execute_mode
 
@@ -164,7 +164,7 @@ def _save_env_values(new_values: Dict[str, str]) -> None:
 
 
 def _is_logged_in() -> bool:
-    return bool(session.get("admin_authenticated"))
+    return bool(session.get("user_id"))
 
 
 def _login_required(func):
@@ -172,6 +172,21 @@ def _login_required(func):
     def wrapper(*args, **kwargs):
         if not _is_logged_in():
             return redirect(url_for("login_page"))
+        g.user_id = session.get("user_id", 0)
+        g.username = session.get("username", "")
+        g.is_admin = session.get("is_admin", False)
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+def _admin_required(func):
+    @wraps(func)
+    @_login_required
+    def wrapper(*args, **kwargs):
+        if not g.is_admin:
+            flash("관리자 권한이 필요합니다.", "error")
+            return redirect(url_for("dashboard"))
         return func(*args, **kwargs)
 
     return wrapper
@@ -197,6 +212,7 @@ def _safe_broker_snapshot() -> Dict[str, Any]:
         "holdings": [],
         "total_eval_amount": 0,
         "total_profit_amount": 0,
+        "total_assets": 0,
     }
 
     try:
@@ -225,6 +241,7 @@ def _safe_broker_snapshot() -> Dict[str, Any]:
                 "holdings": holdings,
                 "total_eval_amount": total_eval,
                 "total_profit_amount": total_profit,
+                "total_assets": balance + total_eval,
             }
         )
     except Exception as e:
@@ -302,32 +319,33 @@ def _snapshot_ai_state() -> Dict[str, Any]:
         return dict(AI_RUN_STATE)
 
 
-def _run_ai_action_in_background(mode: str, run_id: str) -> None:
+def _run_ai_action_in_background(mode: str, run_id: str, user_id: int = 0) -> None:
     with AI_RUN_LOCK:
         AI_RUN_STATE.update(
             {
                 "running": True,
                 "run_id": run_id,
                 "mode": mode,
+                "user_id": user_id,
                 "started_at": _cfg.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "finished_at": "",
                 "last_result": None,
             }
         )
 
-    result = _run_bot_mode(mode, run_id=run_id)
+    result = _run_bot_mode(mode, run_id=run_id, user_id=user_id)
     with AI_RUN_LOCK:
         AI_RUN_STATE["running"] = False
         AI_RUN_STATE["finished_at"] = _cfg.now().strftime("%Y-%m-%d %H:%M:%S")
         AI_RUN_STATE["last_result"] = result
 
 
-def _run_bot_mode(mode: str, run_id: str = "") -> Dict[str, Any]:
+def _run_bot_mode(mode: str, run_id: str = "", user_id: int = 0) -> Dict[str, Any]:
     """
     백엔드 매매 모드를 웹에서 직접 실행합니다.
     """
     try:
-        result = execute_mode(mode, run_id=run_id or None)
+        result = execute_mode(mode, run_id=run_id or None, user_id=user_id)
         ok = result["ok"]
         output_preview = result.get("output", "(출력 없음)")
         resolved_run_id = result.get("run_id", run_id)
@@ -783,8 +801,19 @@ def _load_schedule_snapshot() -> Dict[str, Any]:
 
 def create_app() -> Flask:
     app = Flask(__name__)
-    # 빈 문자열("")이 들어온 경우도 안전하게 랜덤 키를 사용합니다.
     app.config["SECRET_KEY"] = os.environ.get("WEB_ADMIN_SESSION_SECRET") or secrets.token_hex(24)
+
+    from datetime import timedelta
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=12)
+
+    # DB 초기화 (자동 마이그레이션 포함)
+    try:
+        import db as db_module
+        db_module.init_db()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"DB 초기화 실패, 레거시 모드로 동작: {e}")
+
     _ensure_scheduler_started()
 
     @app.get("/login")
@@ -793,16 +822,39 @@ def create_app() -> Flask:
 
     @app.post("/login")
     def login():
+        username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
+
+        # DB 인증 시도
+        try:
+            import db as db_module
+            from auth import verify_password
+            if db_module.is_db_available() and username:
+                user = db_module.get_user_by_username(username)
+                if user and user["is_active"] and verify_password(password, user["password_hash"]):
+                    session.permanent = True
+                    session["user_id"] = user["id"]
+                    session["username"] = user["username"]
+                    session["is_admin"] = bool(user["is_admin"])
+                    return redirect(url_for("dashboard"))
+                flash("사용자명 또는 비밀번호가 일치하지 않습니다.", "error")
+                return redirect(url_for("login_page"))
+        except Exception:
+            pass
+
+        # 레거시 폴백: .env WEB_ADMIN_PASSWORD (DB 없을 때)
         expected_password = os.environ.get("WEB_ADMIN_PASSWORD", "")
         if not expected_password:
-            flash("WEB_ADMIN_PASSWORD가 설정되지 않았습니다. .env에 먼저 설정해 주세요.", "error")
+            flash("WEB_ADMIN_PASSWORD가 설정되지 않았습니다.", "error")
             return redirect(url_for("login_page"))
         if password != expected_password:
             flash("비밀번호가 일치하지 않습니다.", "error")
             return redirect(url_for("login_page"))
 
-        session["admin_authenticated"] = True
+        session.permanent = True
+        session["user_id"] = 0
+        session["username"] = "admin"
+        session["is_admin"] = True
         return redirect(url_for("dashboard"))
 
     @app.get("/logout")
@@ -888,7 +940,7 @@ def create_app() -> Flask:
         if not query:
             return jsonify({"ok": False, "message": "질문을 입력해 주세요."}), 400
         try:
-            result = execute_mode("ask", query=query)
+            result = execute_mode("ask", query=query, user_id=g.user_id)
             _append_action_history("ask", "success" if result["ok"] else "failed", query)
             return jsonify({"ok": result["ok"], "output": result.get("output", "")})
         except Exception as e:
@@ -937,7 +989,8 @@ def create_app() -> Flask:
                 ), 409
 
         run_id = uuid.uuid4().hex[:12]
-        thread = threading.Thread(target=_run_ai_action_in_background, args=(mode, run_id), daemon=True)
+        user_id = session.get("user_id", 0)
+        thread = threading.Thread(target=_run_ai_action_in_background, args=(mode, run_id, user_id), daemon=True)
         thread.start()
         return jsonify({"ok": True, "run_id": run_id, "mode": mode})
 
@@ -949,7 +1002,7 @@ def create_app() -> Flask:
             flash("지원하지 않는 액션입니다.", "error")
             return redirect(url_for("actions"))
 
-        result = _run_bot_mode(action)
+        result = _run_bot_mode(action, user_id=g.user_id)
         if result["ok"]:
             flash(f"{action} 실행 완료 (rc={result['returncode']})", "success")
         else:
@@ -1068,6 +1121,82 @@ def create_app() -> Flask:
         except Exception as e:
             flash(f"초기화 실패: {e}", "error")
         return redirect(url_for("prompts_page"))
+
+    # ── 관리자: 사용자 관리 ──────────────────────────
+
+    @app.get("/admin/users")
+    @_admin_required
+    def admin_users():
+        try:
+            import db as db_module
+            users = db_module.get_all_users()
+        except Exception:
+            users = []
+        return render_template("admin_users.html", users=users)
+
+    @app.post("/admin/users/create")
+    @_admin_required
+    def admin_create_user():
+        import db as db_module
+        from auth import hash_password
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "").strip()
+        display_name = request.form.get("display_name", "").strip() or username
+        is_admin = request.form.get("is_admin") == "on"
+
+        if not username or not password:
+            flash("사용자명과 비밀번호는 필수입니다.", "error")
+            return redirect(url_for("admin_users"))
+
+        try:
+            db_module.create_user(username, hash_password(password), display_name, is_admin)
+            flash(f"사용자 '{username}' 생성 완료.", "success")
+        except Exception as e:
+            flash(f"생성 실패: {e}", "error")
+        return redirect(url_for("admin_users"))
+
+    @app.post("/admin/users/<int:uid>/toggle")
+    @_admin_required
+    def admin_toggle_user(uid: int):
+        import db as db_module
+        user = db_module.get_user_by_id(uid)
+        if user:
+            db_module.update_user(uid, is_active=0 if user["is_active"] else 1)
+            flash(f"사용자 '{user['username']}' 상태 변경.", "success")
+        return redirect(url_for("admin_users"))
+
+    @app.post("/admin/users/<int:uid>/reset-password")
+    @_admin_required
+    def admin_reset_password(uid: int):
+        import db as db_module
+        from auth import hash_password
+        new_pw = request.form.get("new_password", "").strip()
+        if not new_pw:
+            flash("새 비밀번호를 입력하세요.", "error")
+            return redirect(url_for("admin_users"))
+        db_module.update_user(uid, password_hash=hash_password(new_pw))
+        flash("비밀번호가 변경되었습니다.", "success")
+        return redirect(url_for("admin_users"))
+
+    @app.post("/admin/users/<int:uid>/delete")
+    @_admin_required
+    def admin_delete_user(uid: int):
+        import db as db_module
+        if uid == g.user_id:
+            flash("자신의 계정은 삭제할 수 없습니다.", "error")
+            return redirect(url_for("admin_users"))
+        db_module.delete_user(uid)
+        flash("사용자가 삭제되었습니다.", "success")
+        return redirect(url_for("admin_users"))
+
+    # ── context processor: 모든 템플릿에 사용자 정보 주입 ──
+    @app.context_processor
+    def inject_user():
+        return {
+            "current_user_id": session.get("user_id", 0),
+            "current_username": session.get("username", ""),
+            "current_is_admin": session.get("is_admin", False),
+        }
 
     return app
 

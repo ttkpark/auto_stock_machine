@@ -23,12 +23,15 @@
       <div class="sub">{{ broker_data.error if not broker_data.ok else "브로커 API 조회 기준" }}</div>
     </div>
     <div class="card">
-      <h2>총 평가손익</h2>
+      <h2>총 자산</h2>
       {% if broker_data.ok %}
-        <div class="kpi {% if broker_data.total_profit_amount >= 0 %}ok{% else %}bad{% endif %}">
-          {{ format_won(broker_data.total_profit_amount) }}
+        <div class="kpi">{{ format_won(broker_data.total_assets) }}</div>
+        <div class="sub">
+          예수금 {{ format_won(broker_data.balance) }} + 평가금액 {{ format_won(broker_data.total_eval_amount) }}
         </div>
-        <div class="sub">총 평가금액: {{ format_won(broker_data.total_eval_amount) }}</div>
+        <div class="sub {% if broker_data.total_profit_amount >= 0 %}ok{% else %}bad{% endif %}" style="margin-top:4px;">
+          평가손익: {{ format_won(broker_data.total_profit_amount) }}
+        </div>
       {% else %}
         <div class="kpi bad">조회 실패</div>
         <div class="sub">브로커 인증/계좌 설정 확인 필요</div>
