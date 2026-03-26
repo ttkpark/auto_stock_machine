@@ -123,7 +123,14 @@ def _read_env_lines() -> List[str]:
     return ENV_PATH.read_text(encoding="utf-8").splitlines()
 
 
-def _load_env_values() -> Dict[str, str]:
+def _load_env_values(user_id: int = 0) -> Dict[str, str]:
+    if user_id and user_id > 0:
+        try:
+            import db as db_module
+            return db_module.get_user_config(user_id)
+        except Exception:
+            pass
+    # 레거시 폴백
     load_dotenv(ENV_PATH, override=True)
     values: Dict[str, str] = {}
     for key in MANAGED_KEYS:
@@ -131,11 +138,17 @@ def _load_env_values() -> Dict[str, str]:
     return values
 
 
-def _save_env_values(new_values: Dict[str, str]) -> None:
-    """
-    .env 파일의 기존 구조(주석/순서)를 최대한 유지하면서 값만 교체합니다.
-    파일에 없던 키는 맨 아래에 추가합니다.
-    """
+def _save_env_values(new_values: Dict[str, str], user_id: int = 0) -> None:
+    """설정 저장. user_id > 0이면 DB, 아니면 .env 파일."""
+    if user_id and user_id > 0:
+        try:
+            import db as db_module
+            db_module.set_user_config_bulk(user_id, new_values)
+            return
+        except Exception:
+            pass
+
+    # 레거시: .env 파일 직접 수정
     lines = _read_env_lines()
     seen = set()
     updated_lines: List[str] = []
@@ -159,7 +172,6 @@ def _save_env_values(new_values: Dict[str, str]) -> None:
             updated_lines.append(f"{key}={new_values[key]}")
 
     ENV_PATH.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
-    # 저장 후 현재 프로세스 환경에도 즉시 반영
     load_dotenv(ENV_PATH, override=True)
 
 
@@ -204,7 +216,7 @@ def _calc_profit_amount(holding: Dict[str, Any]) -> int:
     return (holding.get("current_price", 0) - holding.get("avg_price", 0)) * holding.get("qty", 0)
 
 
-def _safe_broker_snapshot() -> Dict[str, Any]:
+def _safe_broker_snapshot(user_id: int = 0) -> Dict[str, Any]:
     """
     브로커 연결 상태/잔고/보유종목을 조회합니다.
     실패해도 대시보드가 죽지 않도록 예외를 흡수합니다.
@@ -220,12 +232,12 @@ def _safe_broker_snapshot() -> Dict[str, Any]:
     }
 
     try:
-        if _read_bool_env("IS_REAL_TRADING", False):
-            from brokers import RealBroker
-            broker = RealBroker()
+        from user_context import UserContext
+        if user_id and user_id > 0:
+            ctx = UserContext.from_user_id(user_id)
         else:
-            from brokers import MockBroker
-            broker = MockBroker()
+            ctx = UserContext.from_env_fallback()
+        broker = ctx.get_broker()
         balance = broker.get_balance()
         holdings = broker.get_holdings()
         total_eval = 0
@@ -869,15 +881,15 @@ def create_app() -> Flask:
     @app.get("/")
     @_login_required
     def dashboard():
-        broker_data = _safe_broker_snapshot()
-        env_values = _load_env_values()
+        broker_data = _safe_broker_snapshot(user_id=g.user_id)
+        env_values = _load_env_values(user_id=g.user_id)
         server = _server_status_snapshot()
         today_actions = _parse_today_log_actions()
         recent_history = _load_action_history()[-20:][::-1]
 
         return render_template(
             "dashboard.html",
-            trading_mode="실전투자" if _read_bool_env("IS_REAL_TRADING", False) else "모의투자",
+            trading_mode="실전투자" if env_values.get("IS_REAL_TRADING", "False") == "True" else "모의투자",
             env_values=env_values,
             broker_data=broker_data,
             server=server,
@@ -889,10 +901,10 @@ def create_app() -> Flask:
     @app.post("/toggle-trading")
     @_login_required
     def toggle_trading():
-        values = _load_env_values()
+        values = _load_env_values(user_id=g.user_id)
         current = values.get("IS_REAL_TRADING", "False")
         values["IS_REAL_TRADING"] = "False" if current == "True" else "True"
-        _save_env_values(values)
+        _save_env_values(values, user_id=g.user_id)
         mode_txt = "실전투자" if values["IS_REAL_TRADING"] == "True" else "모의투자"
         flash(f"투자 모드를 {mode_txt}로 변경했습니다. (다음 실행부터 반영)", "success")
         return redirect(url_for("dashboard"))
@@ -900,14 +912,14 @@ def create_app() -> Flask:
     @app.get("/settings")
     @_login_required
     def settings():
-        values = _load_env_values()
+        values = _load_env_values(user_id=g.user_id)
         masked_values = {k: _mask_value(k, v) for k, v in values.items()}
         return render_template("settings.html", values=values, masked_values=masked_values, managed_keys=MANAGED_KEYS, model_options=MODEL_OPTIONS)
 
     @app.post("/settings/save")
     @_login_required
     def settings_save():
-        current_values = _load_env_values()
+        current_values = _load_env_values(user_id=g.user_id)
         new_values: Dict[str, str] = {}
         for key in MANAGED_KEYS:
             value = request.form.get(key, "").strip()
@@ -924,7 +936,7 @@ def create_app() -> Flask:
             flash("IS_REAL_TRADING 값은 True 또는 False 여야 합니다.", "error")
             return redirect(url_for("settings"))
 
-        _save_env_values(new_values)
+        _save_env_values(new_values, user_id=g.user_id)
         flash("설정이 저장되었습니다. 다음 실행부터 반영됩니다.", "success")
         return redirect(url_for("settings"))
 
