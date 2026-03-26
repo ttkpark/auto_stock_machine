@@ -24,15 +24,36 @@ logger = logging.getLogger(__name__)
 class TraceRecorder:
     """AI 판단 과정을 구조화해 저장합니다."""
 
-    def __init__(self, mode: BotMode, run_id: str, trading_mode: str):
+    def __init__(self, mode: BotMode, run_id: str, trading_mode: str, user_id: int = 0):
         self.mode = mode
         self.run_id = run_id
         self.trading_mode = trading_mode
+        self.user_id = user_id
 
     def record(self, event_type: str, **payload: Any) -> None:
+        now_str = config_module.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # DB 모드 (user_id > 0)
+        if self.user_id > 0:
+            try:
+                import db as db_module
+                db_module.insert_trace(
+                    user_id=self.user_id,
+                    run_id=self.run_id,
+                    mode=self.mode,
+                    trading_mode=self.trading_mode,
+                    event_type=event_type,
+                    payload=payload,
+                    created_at=now_str,
+                )
+                return
+            except Exception:
+                pass  # DB 실패 시 파일 폴백
+
+        # 레거시: JSONL 파일
         TRACE_PATH.parent.mkdir(parents=True, exist_ok=True)
         row = {
-            "time": config_module.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "time": now_str,
             "run_id": self.run_id,
             "mode": self.mode,
             "trading_mode": self.trading_mode,
@@ -220,7 +241,7 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
 
     # 헬퍼 초기화
     market_data = MarketDataProvider()
-    tracker = HoldingsTracker()
+    tracker = HoldingsTracker(user_id=trace.user_id)
     tracker.sync_from_holdings(holdings)
     decision_maker = DecisionMaker()
 
@@ -548,22 +569,35 @@ def run_ask_logic(
     return result
 
 
-def execute_mode(mode: BotMode, run_id: str | None = None, query: str = "") -> Dict[str, Any]:
+def execute_mode(mode: BotMode, run_id: str | None = None, query: str = "",
+                  user_id: int = 0) -> Dict[str, Any]:
     """
-    buy/sell/status 중 하나를 실행하고 결과를 반환합니다.
+    buy/sell/status/ask 중 하나를 실행하고 결과를 반환합니다.
+    user_id > 0이면 DB에서 사용자 설정을 로드, 아니면 .env 폴백.
     """
     cfg = _prepare_runtime()
-    trading_mode = "실전투자" if cfg.IS_REAL_TRADING else "모의투자"
     effective_run_id = run_id or uuid.uuid4().hex[:12]
-    trace = TraceRecorder(mode=mode, run_id=effective_run_id, trading_mode=trading_mode)
+
+    # UserContext로 사용자별 의존성 생성
+    if user_id > 0:
+        from user_context import UserContext
+        ctx = UserContext.from_user_id(user_id)
+    else:
+        from user_context import UserContext
+        ctx = UserContext.from_env_fallback()
+
+    is_real = ctx.config.get("IS_REAL_TRADING", "False").lower() == "true"
+    trading_mode = "실전투자" if is_real else "모의투자"
+    trace = TraceRecorder(mode=mode, run_id=effective_run_id,
+                          trading_mode=trading_mode, user_id=ctx.user_id)
 
     trace.record("run_start")
-    logger.info(f"봇 시작 | 모드: {mode} | 환경: {trading_mode}")
+    logger.info(f"봇 시작 | 모드: {mode} | 환경: {trading_mode} | 사용자: {ctx.username}")
 
     try:
-        broker = cfg.get_broker()
-        analyzers = cfg.get_analyzers()
-        notifier = TelegramNotifier()
+        broker = ctx.get_broker()
+        analyzers = ctx.get_analyzers()
+        notifier = ctx.get_notifier()
         validator = StockValidator()
 
         if mode == "buy":
@@ -584,7 +618,7 @@ def execute_mode(mode: BotMode, run_id: str | None = None, query: str = "") -> D
         logger.error(f"치명적 오류 발생: {e}", exc_info=True)
         trace.record("run_end", status="failed", error=str(e))
         try:
-            TelegramNotifier().notify_error("execute_mode()", e)
+            ctx.get_notifier().notify_error("execute_mode()", e)
         except Exception:
             pass
         return {"ok": False, "returncode": 1, "output": str(e), "run_id": effective_run_id}

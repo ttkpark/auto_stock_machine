@@ -21,14 +21,14 @@ DEFAULT_MODEL_NAME = "gpt-4o-mini"
 
 
 class OpenAIAnalyzer(BaseAnalyzer):
-    def __init__(self):
-        api_key = os.environ.get("OPENAI_API_KEY", "")
+    def __init__(self, api_key: str = "", model_name: str = ""):
+        api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
         if not api_key:
             raise EnvironmentError(
-                ".env 파일에 OPENAI_API_KEY 가 설정되어 있지 않습니다."
+                "OPENAI_API_KEY 가 설정되어 있지 않습니다."
             )
         self.client = OpenAI(api_key=api_key)
-        self.model_name = os.environ.get("OPENAI_MODEL_NAME", "").strip() or DEFAULT_MODEL_NAME
+        self.model_name = (model_name or os.environ.get("OPENAI_MODEL_NAME", "")).strip() or DEFAULT_MODEL_NAME
         self.last_recommendation_error = ""
         logger.info(f"[OpenAIAnalyzer] 초기화 완료 (모델: {self.model_name})")
 

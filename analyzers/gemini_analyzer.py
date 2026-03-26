@@ -22,14 +22,14 @@ FALLBACK_MODEL_NAMES = ["gemini-2.5-flash", "gemini-flash-latest"]
 
 
 class GeminiAnalyzer(BaseAnalyzer):
-    def __init__(self):
-        api_key = os.environ.get("GEMINI_API_KEY", "")
+    def __init__(self, api_key: str = "", model_name: str = ""):
+        api_key = api_key or os.environ.get("GEMINI_API_KEY", "")
         if not api_key:
             raise EnvironmentError(
-                ".env 파일에 GEMINI_API_KEY 가 설정되어 있지 않습니다."
+                "GEMINI_API_KEY 가 설정되어 있지 않습니다."
             )
         genai.configure(api_key=api_key)
-        preferred_model = os.environ.get("GEMINI_MODEL_NAME", "").strip() or DEFAULT_MODEL_NAME
+        preferred_model = (model_name or os.environ.get("GEMINI_MODEL_NAME", "")).strip() or DEFAULT_MODEL_NAME
         self.model_name = preferred_model
         self.model = genai.GenerativeModel(preferred_model)
         self.last_recommendation_error = ""

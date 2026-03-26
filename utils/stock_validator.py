@@ -24,7 +24,7 @@ class StockValidator:
         self.refresh()
 
     def refresh(self) -> None:
-        """KRX 전체 상장 종목 딕셔너리를 최신 데이터로 갱신합니다."""
+        """KRX 전체 상장 종목 + ETF 딕셔너리를 최신 데이터로 갱신합니다."""
         logger.info("[StockValidator] KRX 종목 목록 갱신 중...")
         try:
             krx = fdr.StockListing("KRX")
@@ -48,6 +48,23 @@ class StockValidator:
                     val = str(row.get(col, "")).strip()
                     if val and val != "nan":
                         self._krx_dict[val] = code
+
+            # ETF 목록 추가 로드 (KRX 일반 종목에 ETF가 포함되지 않음)
+            try:
+                etf = fdr.StockListing("ETF/KR")
+                etf_count = 0
+                for _, row in etf.iterrows():
+                    code = str(row.get("Symbol", "")).strip()
+                    if not code:
+                        continue
+                    self._code_set.add(code)
+                    name = str(row.get("Name", "")).strip()
+                    if name and name != "nan":
+                        self._krx_dict[name] = code
+                        etf_count += 1
+                logger.info(f"[StockValidator] ETF {etf_count}개 추가 로드 완료.")
+            except Exception as e:
+                logger.warning(f"[StockValidator] ETF 목록 로드 실패 (무시): {e}")
 
             self._last_updated = date.today()
             logger.info(

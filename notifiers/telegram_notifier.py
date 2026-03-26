@@ -17,13 +17,14 @@ class TelegramNotifier:
     SUBSCRIBERS_FILE = Path("data/telegram_subscribers.json")
     UPDATES_OFFSET_FILE = Path("data/telegram_updates_offset.txt")
 
-    def __init__(self):
-        self.token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-        self.chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    def __init__(self, token: str = "", chat_id: str = "", user_id: int = 0):
+        self.token = token or os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        self.chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID", "")
+        self.user_id = user_id
 
         if not self.token:
             logger.warning(
-                ".env 파일에 TELEGRAM_BOT_TOKEN 이 설정되어 있어야 합니다."
+                "TELEGRAM_BOT_TOKEN 이 설정되어 있어야 합니다."
             )
             return
 
@@ -35,6 +36,15 @@ class TelegramNotifier:
         return f"https://api.telegram.org/bot{self.token}/{method}"
 
     def _load_subscribers(self) -> set[str]:
+        # DB 모드 (user_id > 0)
+        if self.user_id > 0:
+            try:
+                import db as db_module
+                return set(db_module.get_telegram_subscribers(self.user_id))
+            except Exception:
+                pass
+
+        # 레거시: JSON 파일
         if not self.SUBSCRIBERS_FILE.exists():
             return set()
         try:
@@ -46,8 +56,18 @@ class TelegramNotifier:
         return set()
 
     def _save_subscribers(self, subscribers: set[str]) -> None:
+        # DB 모드 (user_id > 0)
+        if self.user_id > 0:
+            try:
+                import db as db_module
+                for chat_id in subscribers:
+                    db_module.add_telegram_subscriber(self.user_id, chat_id)
+                return
+            except Exception:
+                pass
+
+        # 레거시: JSON 파일
         def _subscriber_sort_key(chat_id: str):
-            # 숫자형 chat_id(예: 개인/그룹)를 우선 정렬하고, 나머지는 문자열로 정렬합니다.
             normalized = chat_id.strip()
             signed = normalized[1:] if normalized.startswith("-") else normalized
             if signed.isdigit():

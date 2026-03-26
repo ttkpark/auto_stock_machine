@@ -19,16 +19,18 @@ logger = logging.getLogger(__name__)
 class RealBroker(BaseBroker):
     BASE_URL = "https://openapi.koreainvestment.com:9443"
 
-    def __init__(self):
-        self.app_key = os.environ.get("KIS_REAL_APP_KEY", "")
-        self.app_secret = os.environ.get("KIS_REAL_APP_SECRET", "")
-        self.account_number = os.environ.get("KIS_REAL_ACCOUNT_NUMBER", "")
+    def __init__(self, app_key: str = "", app_secret: str = "",
+                 account_number: str = "", user_id: int = 0):
+        self.app_key = app_key or os.environ.get("KIS_REAL_APP_KEY", "")
+        self.app_secret = app_secret or os.environ.get("KIS_REAL_APP_SECRET", "")
+        self.account_number = account_number or os.environ.get("KIS_REAL_ACCOUNT_NUMBER", "")
+        self.user_id = user_id
         self._access_token: Optional[str] = None
         self.last_order_error: str = ""
 
         if not all([self.app_key, self.app_secret, self.account_number]):
             raise EnvironmentError(
-                ".env 파일에 KIS_REAL_APP_KEY, KIS_REAL_APP_SECRET, "
+                "KIS_REAL_APP_KEY, KIS_REAL_APP_SECRET, "
                 "KIS_REAL_ACCOUNT_NUMBER 가 모두 설정되어 있어야 합니다."
             )
         logger.warning("[RealBroker] 실전투자 브로커 초기화 - 실제 계좌가 연결되었습니다!")
@@ -77,7 +79,7 @@ class RealBroker(BaseBroker):
             "PDNO": "005930",
             "ORD_UNPR": "0",
             "ORD_DVSN": "01",
-            "CMA_EVLU_AMT_ICLD_YN": "Y",
+            "CMA_EVLU_AMT_ICLD_YN": "N",
             "OVRS_ICLD_YN": "N",
         }
         resp = requests.get(url, headers=headers, params=params, timeout=10)

@@ -19,19 +19,19 @@ logger = logging.getLogger(__name__)
 
 class MockBroker(BaseBroker):
     BASE_URL = "https://openapivts.koreainvestment.com:29443"
-    TOKEN_CACHE_FILE = Path("data/kis_mock_token.json")
 
-    def __init__(self):
-        self.app_key = os.environ.get("KIS_MOCK_APP_KEY", "")
-        self.app_secret = os.environ.get("KIS_MOCK_APP_SECRET", "")
-        self.account_number = os.environ.get("KIS_MOCK_ACCOUNT_NUMBER", "")
+    def __init__(self, app_key: str = "", app_secret: str = "",
+                 account_number: str = "", user_id: int = 0):
+        self.app_key = app_key or os.environ.get("KIS_MOCK_APP_KEY", "")
+        self.app_secret = app_secret or os.environ.get("KIS_MOCK_APP_SECRET", "")
+        self.account_number = account_number or os.environ.get("KIS_MOCK_ACCOUNT_NUMBER", "")
+        self.user_id = user_id
         self._access_token: Optional[str] = None
         self.last_order_error: str = ""
-        self.TOKEN_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
 
         if not all([self.app_key, self.app_secret, self.account_number]):
             logger.warning(
-                ".env 파일에 KIS_MOCK_APP_KEY, KIS_MOCK_APP_SECRET, "
+                "KIS_MOCK_APP_KEY, KIS_MOCK_APP_SECRET, "
                 "KIS_MOCK_ACCOUNT_NUMBER 가 모두 설정되어 있는지 확인하세요."
             )
         logger.info("[MockBroker] 모의투자 브로커 초기화 완료.")
@@ -40,10 +40,23 @@ class MockBroker(BaseBroker):
     #  인증 토큰
     # ------------------------------------------------------------------ #
     def _load_cached_token(self) -> Optional[str]:
-        if not self.TOKEN_CACHE_FILE.exists():
+        # DB 기반 토큰 캐시 (user_id > 0)
+        if self.user_id > 0:
+            try:
+                import db as db_module
+                cached = db_module.get_cached_token(self.user_id, "mock")
+                if cached:
+                    return cached["access_token"]
+            except Exception:
+                pass
+            return None
+
+        # 레거시: JSON 파일 캐시
+        token_file = Path("data/kis_mock_token.json")
+        if not token_file.exists():
             return None
         try:
-            data = json.loads(self.TOKEN_CACHE_FILE.read_text(encoding="utf-8"))
+            data = json.loads(token_file.read_text(encoding="utf-8"))
             token = str(data.get("access_token", "")).strip()
             expires_at = int(data.get("expires_at", 0))
             if token and expires_at > int(time.time()) + 30:
@@ -53,16 +66,22 @@ class MockBroker(BaseBroker):
         return None
 
     def _save_cached_token(self, token: str, expires_in: int) -> None:
-        # KIS 토큰은 통상 수시간 유효. 안전 여유를 위해 60초 줄여 저장합니다.
         safe_expires_at = int(time.time()) + max(0, int(expires_in) - 60)
-        payload = {
-            "access_token": token,
-            "expires_at": safe_expires_at,
-        }
-        self.TOKEN_CACHE_FILE.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+
+        # DB 기반 토큰 캐시 (user_id > 0)
+        if self.user_id > 0:
+            try:
+                import db as db_module
+                db_module.save_cached_token(self.user_id, "mock", token, safe_expires_at)
+                return
+            except Exception:
+                pass
+
+        # 레거시: JSON 파일 캐시
+        token_file = Path("data/kis_mock_token.json")
+        token_file.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"access_token": token, "expires_at": safe_expires_at}
+        token_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def get_access_token(self) -> str:
         if self._access_token:
@@ -125,7 +144,7 @@ class MockBroker(BaseBroker):
             "PDNO": "005930",
             "ORD_UNPR": "0",
             "ORD_DVSN": "01",
-            "CMA_EVLU_AMT_ICLD_YN": "Y",
+            "CMA_EVLU_AMT_ICLD_YN": "N",
             "OVRS_ICLD_YN": "N",
         }
         resp = requests.get(url, headers=headers, params=params, timeout=10)
