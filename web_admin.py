@@ -167,12 +167,6 @@ def _is_logged_in() -> bool:
     return "user_id" in session
 
 
-_ADMIN_ONLY_ALLOWED = {
-    "admin_users", "admin_create_user", "admin_toggle_user",
-    "admin_reset_password", "admin_delete_user", "logout", "login_page",
-}
-
-
 def _login_required(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -181,10 +175,6 @@ def _login_required(func):
         g.user_id = session.get("user_id", 0)
         g.username = session.get("username", "")
         g.is_admin = session.get("is_admin", False)
-        g.is_admin_only = g.username == "admin"
-        # admin 계정이 일반 페이지에 접근하면 사용자 관리로 리다이렉트
-        if g.is_admin_only and request.endpoint not in _ADMIN_ONLY_ALLOWED:
-            return redirect(url_for("admin_users"))
         return func(*args, **kwargs)
 
     return wrapper
