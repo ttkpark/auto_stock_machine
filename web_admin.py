@@ -175,6 +175,13 @@ def _login_required(func):
         g.user_id = session.get("user_id", 0)
         g.username = session.get("username", "")
         g.is_admin = session.get("is_admin", False)
+        g.is_admin_only = g.username == "admin"  # admin 계정은 계정 관리 전용
+        # admin 계정이 일반 페이지에 접근하면 사용자 관리로 리다이렉트
+        if g.is_admin_only and func.__name__ not in (
+            "admin_users", "admin_create_user", "admin_toggle_user",
+            "admin_reset_password", "admin_delete_user", "logout",
+        ):
+            return redirect(url_for("admin_users"))
         return func(*args, **kwargs)
 
     return wrapper
