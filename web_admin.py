@@ -751,19 +751,43 @@ def _run_scheduled_mode(mode: str, timezone_name: str, triggered_at: datetime, u
     thread.start()
 
 
+def _notify_admin_login(username: str, ip: str) -> None:
+    """로그인 성공 시 admin의 텔레그램으로 알림을 전송합니다."""
+    try:
+        import db as _db
+        admin_cfg = _db.get_user_config(1)  # admin = user_id 1
+        token = admin_cfg.get("TELEGRAM_BOT_TOKEN", "")
+        if not token:
+            return
+        subscribers = _db.get_telegram_subscribers(1)
+        if not subscribers:
+            return
+        import requests as _req
+        now_str = _cfg.now().strftime("%Y-%m-%d %H:%M:%S")
+        msg = f"[로그인] {username} | IP: {ip} | {now_str}"
+        for chat_id in subscribers:
+            _req.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": msg},
+                timeout=5,
+            )
+    except Exception:
+        pass
+
+
 _LAST_TG_POLL = 0.0
+_TG_BOT_ANNOUNCED = False
 
 
 def _poll_telegram_updates() -> None:
     """모든 활성 사용자의 텔레그램 봇 토큰으로 getUpdates를 폴링합니다."""
-    global _LAST_TG_POLL
+    global _LAST_TG_POLL, _TG_BOT_ANNOUNCED
     now = time.time()
     if now - _LAST_TG_POLL < 30:  # 30초마다 한 번
         return
     _LAST_TG_POLL = now
 
     import db as _db
-    # 텔레그램 토큰이 있는 사용자를 찾아 폴링
     seen_tokens: set[str] = set()
     users = _db.get_all_users()
     for u in users:
@@ -778,7 +802,11 @@ def _poll_telegram_updates() -> None:
         try:
             from notifiers import TelegramNotifier
             notifier = TelegramNotifier(token=token, chat_id=cfg.get("TELEGRAM_CHAT_ID", ""), user_id=uid)
-            # _sync_subscribers_from_updates가 자동으로 연결 명령 처리
+
+            # 서버 시작 후 첫 폴링 시 admin에게 봇 정상 알림 (1회)
+            if not _TG_BOT_ANNOUNCED and uid == 1:
+                _TG_BOT_ANNOUNCED = True
+                notifier.send("[시스템] 텔레그램 봇 폴링이 시작되었습니다.")
         except Exception:
             pass
 
@@ -903,7 +931,10 @@ def create_app() -> Flask:
                     session["user_id"] = user["id"]
                     session["username"] = user["username"]
                     session["is_admin"] = bool(user["is_admin"])
+                    # admin 텔레그램으로 로그인 알림
+                    _notify_admin_login(user["username"], request.remote_addr)
                     return redirect(url_for("dashboard"))
+                _notify_admin_login(f"{username} (실패)", request.remote_addr)
                 flash("사용자명 또는 비밀번호가 일치하지 않습니다.", "error")
                 return redirect(url_for("login_page"))
         except Exception:
