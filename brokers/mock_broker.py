@@ -131,6 +131,10 @@ class MockBroker(BaseBroker):
     #  계좌 정보
     # ------------------------------------------------------------------ #
     def get_balance(self) -> int:
+        # inquire-psbl-order의 ord_psbl_cash(주문가능현금)를 사용합니다.
+        # ※ inquire-balance의 dnca_tot_amt(예탁금총금액)는 순수 현금 입금액만
+        #   표시하므로 정산 대기금·CMA 평가액이 빠져 실제 매수 가능 금액보다
+        #   훨씬 적게 나옵니다. (예: 실제 1,028만원인데 17만원으로 표시)
         url = f"{self.BASE_URL}/uapi/domestic-stock/v1/trading/inquire-psbl-order"
         headers = self._headers()
         headers["tr_id"] = "VTTC8908R"  # 모의투자 주문 가능 금액 조회
