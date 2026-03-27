@@ -87,7 +87,22 @@ def _safe_int_env(key: str, default: int) -> int:
         return default
 
 
-def load_prompts() -> dict:
+def load_prompts(user_id: int = 0) -> dict:
+    """사용자별 프롬프트를 DB에서 로드합니다. DB에 없으면 기본값을 반환합니다."""
+    if user_id:
+        try:
+            import db as _db
+            row = _db.get_user_prompts(user_id)
+            if row:
+                return {
+                    "buy": row.get("buy_template", "") or DEFAULT_BUY_TEMPLATE,
+                    "sell": row.get("sell_template", "") or DEFAULT_SELL_TEMPLATE,
+                    "ask": DEFAULT_ASK_TEMPLATE,
+                    "budget": row.get("budget_template", "") or DEFAULT_BUDGET_TEMPLATE,
+                }
+        except Exception:
+            pass
+    # fallback: 파일 기반 (레거시) 또는 기본값
     if PROMPTS_PATH.exists():
         try:
             data = json.loads(PROMPTS_PATH.read_text(encoding="utf-8"))
@@ -132,8 +147,8 @@ def reset_prompts() -> None:
     save_prompts(DEFAULT_BUY_TEMPLATE, DEFAULT_SELL_TEMPLATE, DEFAULT_BUDGET_TEMPLATE)
 
 
-def build_budget_instruction() -> str:
-    template = load_prompts()["budget"]
+def build_budget_instruction(user_id: int = 0) -> str:
+    template = load_prompts(user_id=user_id)["budget"]
     ratio_raw = _safe_float_env("BUY_BUDGET_RATIO", 0.9)
     max_stocks = _safe_int_env("MAX_BUY_STOCKS", 3)
     return _apply_template(
@@ -145,21 +160,21 @@ def build_budget_instruction() -> str:
     )
 
 
-def build_buy_prompt(balance: int, market_info: str = "") -> str:
-    template = load_prompts()["buy"]
+def build_buy_prompt(balance: int, market_info: str = "", user_id: int = 0) -> str:
+    template = load_prompts(user_id=user_id)["buy"]
     market_info_line = f"추가 시장 정보: {market_info}" if market_info else ""
     return _apply_template(
         template,
         {
             "balance": f"{balance:,}",
-            "budget_instruction": build_budget_instruction(),
+            "budget_instruction": build_budget_instruction(user_id=user_id),
             "market_info_line": market_info_line,
         },
     )
 
 
-def build_ask_prompt(stock_name: str, ticker: str, current_price: int) -> str:
-    template = load_prompts().get("ask", DEFAULT_ASK_TEMPLATE)
+def build_ask_prompt(stock_name: str, ticker: str, current_price: int, user_id: int = 0) -> str:
+    template = load_prompts(user_id=user_id).get("ask", DEFAULT_ASK_TEMPLATE)
     return _apply_template(
         template,
         {
@@ -178,8 +193,9 @@ def build_sell_prompt(
     current_price: int,
     profit_rate: float,
     market_info: str = "",
+    user_id: int = 0,
 ) -> str:
-    template = load_prompts()["sell"]
+    template = load_prompts(user_id=user_id)["sell"]
     market_info_line = market_info if market_info else ""
     return _apply_template(
         template,

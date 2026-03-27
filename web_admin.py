@@ -266,32 +266,27 @@ def _safe_broker_snapshot(user_id: int = 0) -> Dict[str, Any]:
     return result
 
 
-def _load_action_history() -> List[Dict[str, Any]]:
-    if not ACTION_HISTORY_PATH.exists():
-        return []
-    try:
-        data = json.loads(ACTION_HISTORY_PATH.read_text(encoding="utf-8"))
-        if isinstance(data, list):
-            return data
-    except Exception:
-        pass
-    return []
+def _load_action_history(user_id: int = 0) -> List[Dict[str, Any]]:
+    import db as _db
+    rows = _db.get_actions(user_id, limit=200)
+    # DB rows are DESC order; reverse to chronological for callers expecting ASC
+    rows.reverse()
+    # Normalise keys so templates keep working (DB uses "created_at", legacy used "time")
+    for r in rows:
+        if "created_at" in r and "time" not in r:
+            r["time"] = r["created_at"]
+    return rows
 
 
-def _append_action_history(action: str, status: str, detail: str) -> None:
-    ACTION_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    rows = _load_action_history()
-    rows.append(
-        {
-            "time": _cfg.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "action": action,
-            "status": status,
-            "detail": detail,
-        }
+def _append_action_history(action: str, status: str, detail: str, user_id: int = 0) -> None:
+    import db as _db
+    _db.append_action(
+        user_id=user_id,
+        action=action,
+        status=status,
+        detail=detail,
+        created_at=_cfg.now().strftime("%Y-%m-%d %H:%M:%S"),
     )
-    # 최근 200개만 유지
-    rows = rows[-200:]
-    ACTION_HISTORY_PATH.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _parse_today_log_actions() -> List[str]:
@@ -310,24 +305,11 @@ def _parse_today_log_actions() -> List[str]:
     return filtered[-80:]
 
 
-def _load_ai_traces(limit: int = 200, run_id: str = "") -> List[Dict[str, Any]]:
-    if not AI_TRACE_PATH.exists():
-        return []
-
-    rows: List[Dict[str, Any]] = []
-    for raw in AI_TRACE_PATH.read_text(encoding="utf-8", errors="ignore").splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        try:
-            row = json.loads(line)
-        except Exception:
-            continue
-        if run_id and row.get("run_id") != run_id:
-            continue
-        rows.append(row)
-
-    return rows[-limit:]
+def _load_ai_traces(limit: int = 200, run_id: str = "", user_id: int = 0) -> List[Dict[str, Any]]:
+    import db as _db
+    rows = _db.get_traces(user_id, limit=limit, run_id=run_id)
+    # DB returns DESC order; keep that for display (newest first)
+    return rows
 
 
 def _snapshot_ai_state() -> Dict[str, Any]:
@@ -366,7 +348,7 @@ def _run_bot_mode(mode: str, run_id: str = "", user_id: int = 0) -> Dict[str, An
         output_preview = result.get("output", "(출력 없음)")
         resolved_run_id = result.get("run_id", run_id)
         history_detail = f"[run_id={resolved_run_id}] {output_preview}" if resolved_run_id else output_preview
-        _append_action_history(mode, "success" if ok else "failed", history_detail)
+        _append_action_history(mode, "success" if ok else "failed", history_detail, user_id=user_id)
         return {
             "ok": ok,
             "returncode": result["returncode"],
@@ -375,7 +357,7 @@ def _run_bot_mode(mode: str, run_id: str = "", user_id: int = 0) -> Dict[str, An
         }
     except Exception as e:
         history_detail = f"[run_id={run_id}] {e}" if run_id else str(e)
-        _append_action_history(mode, "failed", history_detail)
+        _append_action_history(mode, "failed", history_detail, user_id=user_id)
         return {"ok": False, "returncode": -1, "output": str(e), "run_id": run_id}
 
 
@@ -664,16 +646,19 @@ def _default_schedule_config() -> Dict[str, Any]:
     }
 
 
-def _load_schedule_config() -> Dict[str, Any]:
+def _load_schedule_config(user_id: int = 0) -> Dict[str, Any]:
+    import db as _db
     cfg = _default_schedule_config()
-    if not SCHEDULE_CONFIG_PATH.exists():
-        return cfg
     try:
-        loaded = json.loads(SCHEDULE_CONFIG_PATH.read_text(encoding="utf-8"))
-        if isinstance(loaded, dict):
-            cfg.update(loaded)
+        row = _db.get_schedule_config(user_id)
+        if row:
+            cfg["enabled"] = bool(row.get("enabled", False))
+            cfg["weekdays"] = str(row.get("weekdays", "1-5"))
+            cfg["timezone"] = str(row.get("timezone", "Asia/Seoul"))
+            cfg["buy_times"] = row.get("buy_times", cfg["buy_times"])
+            cfg["sell_times"] = row.get("sell_times", cfg["sell_times"])
     except Exception:
-        return cfg
+        pass
     return cfg
 
 
@@ -683,19 +668,20 @@ def _save_schedule_config(
     timezone_name: str,
     buy_times: List[str],
     sell_times: List[str],
+    user_id: int = 0,
 ) -> None:
+    import db as _db
     if not timezone_name.strip():
         raise ValueError("타임존은 비워둘 수 없습니다. 예: Asia/Seoul")
     validated_weekdays = _normalize_weekdays(weekdays)
-    config = {
-        "enabled": bool(enabled),
-        "weekdays": validated_weekdays,
-        "timezone": timezone_name.strip(),
-        "buy_times": buy_times,
-        "sell_times": sell_times,
-    }
-    SCHEDULE_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SCHEDULE_CONFIG_PATH.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+    _db.save_schedule_config(
+        user_id=user_id,
+        enabled=bool(enabled),
+        weekdays=validated_weekdays,
+        timezone=timezone_name.strip(),
+        buy_times=buy_times,
+        sell_times=sell_times,
+    )
 
 
 def _current_time_in_timezone(timezone_name: str):
@@ -728,10 +714,10 @@ def _time_due(now: datetime, weekdays: str, hhmm_list: List[str]) -> bool:
     return now.strftime("%H:%M") in set(hhmm_list)
 
 
-def _run_scheduled_mode(mode: str, timezone_name: str, triggered_at: datetime) -> None:
+def _run_scheduled_mode(mode: str, timezone_name: str, triggered_at: datetime, user_id: int = 0) -> None:
     with AI_RUN_LOCK:
         if AI_RUN_STATE["running"]:
-            _append_action_history(mode, "skipped", f"[scheduler] {mode} 스킵: 이미 실행 중")
+            _append_action_history(mode, "skipped", f"[scheduler] {mode} 스킵: 이미 실행 중", user_id=user_id)
             return
 
     run_id = uuid.uuid4().hex[:12]
@@ -739,28 +725,35 @@ def _run_scheduled_mode(mode: str, timezone_name: str, triggered_at: datetime) -
         mode,
         "queued",
         f"[scheduler] {timezone_name} {triggered_at.strftime('%Y-%m-%d %H:%M')} 트리거 (run_id={run_id})",
+        user_id=user_id,
     )
-    thread = threading.Thread(target=_run_ai_action_in_background, args=(mode, run_id), daemon=True)
+    thread = threading.Thread(target=_run_ai_action_in_background, args=(mode, run_id, user_id), daemon=True)
     thread.start()
 
 
 def _scheduler_loop() -> None:
+    import db as _db
     fired_keys: set[str] = set()
     while True:
         try:
-            config = _load_schedule_config()
-            now = _current_time_in_timezone(str(config.get("timezone", "Asia/Seoul")))
-            enabled = bool(config.get("enabled", False))
-            weekdays = str(config.get("weekdays", "1-5"))
-            buy_times = [str(v) for v in config.get("buy_times", [])]
-            sell_times = [str(v) for v in config.get("sell_times", [])]
+            # 모든 활성 사용자의 스케줄을 순회
+            schedules = _db.get_all_active_schedules()
+            now_fallback = _current_time_in_timezone("Asia/Seoul")
 
+            has_any_active = bool(schedules)
             with SCHEDULER_STATE_LOCK:
                 SCHEDULER_STATE["running"] = True
-                SCHEDULER_STATE["last_tick"] = now.strftime("%Y-%m-%d %H:%M:%S")
-                SCHEDULER_STATE["last_message"] = "활성" if enabled else "비활성"
+                SCHEDULER_STATE["last_tick"] = now_fallback.strftime("%Y-%m-%d %H:%M:%S")
+                SCHEDULER_STATE["last_message"] = f"활성 ({len(schedules)}명)" if has_any_active else "비활성"
 
-            if enabled:
+            for sched in schedules:
+                user_id = sched.get("user_id", 0)
+                tz_name = str(sched.get("timezone", "Asia/Seoul"))
+                weekdays = str(sched.get("weekdays", "1-5"))
+                buy_times = [str(v) for v in sched.get("buy_times", [])]
+                sell_times = [str(v) for v in sched.get("sell_times", [])]
+                now = _current_time_in_timezone(tz_name)
+
                 due_modes: List[str] = []
                 if _time_due(now, weekdays, buy_times):
                     due_modes.append("buy")
@@ -768,15 +761,15 @@ def _scheduler_loop() -> None:
                     due_modes.append("sell")
 
                 for mode in due_modes:
-                    fire_key = f"{mode}:{now.strftime('%Y-%m-%d %H:%M')}"
+                    fire_key = f"u{user_id}:{mode}:{now.strftime('%Y-%m-%d %H:%M')}"
                     if fire_key in fired_keys:
                         continue
                     fired_keys.add(fire_key)
-                    if len(fired_keys) > 1000:
-                        fired_keys = set(list(fired_keys)[-400:])
+                    if len(fired_keys) > 2000:
+                        fired_keys = set(list(fired_keys)[-800:])
                     with SCHEDULER_STATE_LOCK:
                         SCHEDULER_STATE["last_triggered"][mode] = now.strftime("%Y-%m-%d %H:%M:%S")
-                    _run_scheduled_mode(mode, str(config.get("timezone", "Asia/Seoul")), now)
+                    _run_scheduled_mode(mode, tz_name, now, user_id=user_id)
         except Exception as e:
             with SCHEDULER_STATE_LOCK:
                 SCHEDULER_STATE["last_message"] = f"오류: {e}"
@@ -792,8 +785,8 @@ def _ensure_scheduler_started() -> None:
     thread.start()
 
 
-def _load_schedule_snapshot() -> Dict[str, Any]:
-    config = _load_schedule_config()
+def _load_schedule_snapshot(user_id: int = 0) -> Dict[str, Any]:
+    config = _load_schedule_config(user_id=user_id)
     with SCHEDULER_STATE_LOCK:
         state = {
             "running": SCHEDULER_STATE.get("running", False),
@@ -885,7 +878,7 @@ def create_app() -> Flask:
         env_values = _load_env_values(user_id=g.user_id)
         server = _server_status_snapshot()
         today_actions = _parse_today_log_actions()
-        recent_history = _load_action_history()[-20:][::-1]
+        recent_history = _load_action_history(user_id=g.user_id)[-20:][::-1]
 
         return render_template(
             "dashboard.html",
@@ -957,16 +950,16 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "message": "질문을 입력해 주세요."}), 400
         try:
             result = execute_mode("ask", query=query, user_id=g.user_id)
-            _append_action_history("ask", "success" if result["ok"] else "failed", query)
+            _append_action_history("ask", "success" if result["ok"] else "failed", query, user_id=g.user_id)
             return jsonify({"ok": result["ok"], "output": result.get("output", "")})
         except Exception as e:
-            _append_action_history("ask", "failed", f"{query} | {e}")
+            _append_action_history("ask", "failed", f"{query} | {e}", user_id=g.user_id)
             return jsonify({"ok": False, "message": str(e)}), 500
 
     @app.get("/actions")
     @_login_required
     def actions():
-        history = _load_action_history()[::-1]
+        history = _load_action_history(user_id=g.user_id)[::-1]
         today_actions = _parse_today_log_actions()[::-1]
         return render_template("actions.html", history=history, today_actions=today_actions)
 
@@ -974,7 +967,7 @@ def create_app() -> Flask:
     @_login_required
     def ai_page():
         state = _snapshot_ai_state()
-        traces = _load_ai_traces(limit=200, run_id=state.get("run_id", ""))
+        traces = _load_ai_traces(limit=200, run_id=state.get("run_id", ""), user_id=g.user_id)
         return render_template("ai.html", state=state, traces=traces)
 
     @app.get("/api/ai/state")
@@ -982,7 +975,7 @@ def create_app() -> Flask:
     def api_ai_state():
         state = _snapshot_ai_state()
         run_id = request.args.get("run_id", "").strip() or state.get("run_id", "")
-        traces = _load_ai_traces(limit=200, run_id=run_id)
+        traces = _load_ai_traces(limit=200, run_id=run_id, user_id=g.user_id)
         return jsonify({"state": state, "traces": traces, "active_run_id": run_id})
 
     @app.post("/api/ai/run")
@@ -1045,7 +1038,7 @@ def create_app() -> Flask:
     @_login_required
     def schedule():
         try:
-            snapshot = _load_schedule_snapshot()
+            snapshot = _load_schedule_snapshot(user_id=g.user_id)
         except Exception as e:
             flash(f"스케줄 조회 실패: {e}", "error")
             snapshot = {
@@ -1085,6 +1078,7 @@ def create_app() -> Flask:
                 timezone_name=timezone_name,
                 buy_times=buy_times,
                 sell_times=sell_times,
+                user_id=g.user_id,
             )
             if enabled:
                 flash("스케줄을 저장했습니다. 웹 스케줄러가 즉시 반영합니다.", "success")
@@ -1097,13 +1091,22 @@ def create_app() -> Flask:
     @app.get("/prompts")
     @_login_required
     def prompts_page():
-        from utils.prompt_manager import load_prompts, DEFAULT_BUY_TEMPLATE, DEFAULT_SELL_TEMPLATE, DEFAULT_BUDGET_TEMPLATE
-        current = load_prompts()
+        import db as _db
+        from utils.prompt_manager import DEFAULT_BUY_TEMPLATE, DEFAULT_SELL_TEMPLATE, DEFAULT_BUDGET_TEMPLATE
+        row = _db.get_user_prompts(g.user_id)
+        if row:
+            buy_tpl = row.get("buy_template", "") or DEFAULT_BUY_TEMPLATE
+            sell_tpl = row.get("sell_template", "") or DEFAULT_SELL_TEMPLATE
+            budget_tpl = row.get("budget_template", "") or DEFAULT_BUDGET_TEMPLATE
+        else:
+            buy_tpl = DEFAULT_BUY_TEMPLATE
+            sell_tpl = DEFAULT_SELL_TEMPLATE
+            budget_tpl = DEFAULT_BUDGET_TEMPLATE
         return render_template(
             "prompts.html",
-            buy_template=current["buy"],
-            sell_template=current["sell"],
-            budget_template=current.get("budget", DEFAULT_BUDGET_TEMPLATE),
+            buy_template=buy_tpl,
+            sell_template=sell_tpl,
+            budget_template=budget_tpl,
             default_buy=DEFAULT_BUY_TEMPLATE,
             default_sell=DEFAULT_SELL_TEMPLATE,
             default_budget=DEFAULT_BUDGET_TEMPLATE,
@@ -1113,7 +1116,7 @@ def create_app() -> Flask:
     @app.post("/prompts/save")
     @_login_required
     def prompts_save():
-        from utils.prompt_manager import save_prompts
+        import db as _db
         buy_template = request.form.get("buy_template", "").strip()
         sell_template = request.form.get("sell_template", "").strip()
         budget_template = request.form.get("budget_template", "").strip()
@@ -1121,7 +1124,7 @@ def create_app() -> Flask:
             flash("매수/매도/예산 프롬프트는 비워둘 수 없습니다.", "error")
             return redirect(url_for("prompts_page"))
         try:
-            save_prompts(buy_template, sell_template, budget_template)
+            _db.save_user_prompts(g.user_id, buy_template, sell_template, budget_template)
             flash("프롬프트가 저장되었습니다. 다음 AI 실행부터 반영됩니다.", "success")
         except Exception as e:
             flash(f"저장 실패: {e}", "error")
@@ -1130,9 +1133,10 @@ def create_app() -> Flask:
     @app.post("/prompts/reset")
     @_login_required
     def prompts_reset():
-        from utils.prompt_manager import reset_prompts
+        import db as _db
+        from utils.prompt_manager import DEFAULT_BUY_TEMPLATE, DEFAULT_SELL_TEMPLATE, DEFAULT_BUDGET_TEMPLATE
         try:
-            reset_prompts()
+            _db.save_user_prompts(g.user_id, DEFAULT_BUY_TEMPLATE, DEFAULT_SELL_TEMPLATE, DEFAULT_BUDGET_TEMPLATE)
             flash("프롬프트를 기본값으로 초기화했습니다.", "success")
         except Exception as e:
             flash(f"초기화 실패: {e}", "error")
