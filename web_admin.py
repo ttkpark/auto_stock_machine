@@ -751,6 +751,38 @@ def _run_scheduled_mode(mode: str, timezone_name: str, triggered_at: datetime, u
     thread.start()
 
 
+_LAST_TG_POLL = 0.0
+
+
+def _poll_telegram_updates() -> None:
+    """모든 활성 사용자의 텔레그램 봇 토큰으로 getUpdates를 폴링합니다."""
+    global _LAST_TG_POLL
+    now = time.time()
+    if now - _LAST_TG_POLL < 30:  # 30초마다 한 번
+        return
+    _LAST_TG_POLL = now
+
+    import db as _db
+    # 텔레그램 토큰이 있는 사용자를 찾아 폴링
+    seen_tokens: set[str] = set()
+    users = _db.get_all_users()
+    for u in users:
+        if not u.get("is_active"):
+            continue
+        uid = u["id"]
+        cfg = _db.get_user_config(uid)
+        token = cfg.get("TELEGRAM_BOT_TOKEN", "")
+        if not token or token in seen_tokens:
+            continue
+        seen_tokens.add(token)
+        try:
+            from notifiers import TelegramNotifier
+            notifier = TelegramNotifier(token=token, chat_id=cfg.get("TELEGRAM_CHAT_ID", ""), user_id=uid)
+            # _sync_subscribers_from_updates가 자동으로 연결 명령 처리
+        except Exception:
+            pass
+
+
 def _scheduler_loop() -> None:
     import db as _db
     fired_keys: set[str] = set()
@@ -790,6 +822,12 @@ def _scheduler_loop() -> None:
                     with SCHEDULER_STATE_LOCK:
                         SCHEDULER_STATE["last_triggered"][mode] = now.strftime("%Y-%m-%d %H:%M:%S")
                     _run_scheduled_mode(mode, tz_name, now, user_id=user_id)
+            # 텔레그램 봇 메시지 폴링 (계정 연결 명령 처리)
+            try:
+                _poll_telegram_updates()
+            except Exception:
+                pass
+
         except Exception as e:
             with SCHEDULER_STATE_LOCK:
                 SCHEDULER_STATE["last_message"] = f"오류: {e}"

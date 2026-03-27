@@ -91,6 +91,45 @@ class TelegramNotifier:
     def _save_update_offset(self, offset: int) -> None:
         self.UPDATES_OFFSET_FILE.write_text(str(offset), encoding="utf-8")
 
+    def _handle_link_command(self, chat_id: str, text: str) -> None:
+        """텔레그램에서 '연결 username password'로 계정을 연결합니다."""
+        parts = text.split(maxsplit=2)
+        if len(parts) < 3:
+            self._send_to_chat(
+                chat_id,
+                "사용법: 연결 사용자명 비밀번호\n예: 연결 ghpark mypassword",
+            )
+            return
+
+        _, username, password = parts
+        try:
+            import db as db_module
+            from auth import verify_password
+
+            user = db_module.get_user_by_username(username)
+            if not user or not user["is_active"]:
+                self._send_to_chat(chat_id, "사용자를 찾을 수 없습니다.")
+                return
+
+            if not verify_password(password, user["password_hash"]):
+                self._send_to_chat(chat_id, "비밀번호가 일치하지 않습니다.")
+                return
+
+            user_id = user["id"]
+            db_module.add_telegram_subscriber(user_id, chat_id)
+            # TELEGRAM_CHAT_ID도 설정
+            db_module.set_user_config(user_id, "TELEGRAM_CHAT_ID", chat_id)
+            self._send_to_chat(
+                chat_id,
+                f"'{username}' 계정에 연결되었습니다.\n"
+                f"이제 매수/매도/현황 알림을 받습니다.",
+            )
+            logger.info(f"[Telegram] 계정 연결: {username} ← chat_id={chat_id}")
+
+        except Exception as e:
+            logger.error(f"[Telegram] 계정 연결 오류: {e}")
+            self._send_to_chat(chat_id, f"연결 중 오류가 발생했습니다: {e}")
+
     def _send_to_chat(self, chat_id: str, message: str) -> bool:
         url = self._api_url("sendMessage")
         payload = {
@@ -149,11 +188,18 @@ class TelegramNotifier:
             if not chat_id:
                 continue
 
-            if text == "start":
-                subscribers.add(chat_id)
+            # 계정 연결: "연결 username password"
+            if text.startswith("연결 ") or text.startswith("/link "):
+                self._handle_link_command(chat_id, text)
+                continue
+
+            if text == "start" or text == "/start":
                 self._send_to_chat(
                     chat_id,
-                    "알림 구독이 등록되었습니다. 이제 매매/현황 보고를 받습니다.",
+                    "Auto Stock Bot에 오신 것을 환영합니다.\n\n"
+                    "계정을 연결하려면:\n"
+                    "  연결 사용자명 비밀번호\n\n"
+                    "예: 연결 ghpark mypassword",
                 )
                 logger.info(f"[Telegram] 구독 등록: {chat_id}")
             elif text == "end":
