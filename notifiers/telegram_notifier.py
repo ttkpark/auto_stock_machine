@@ -81,6 +81,19 @@ class TelegramNotifier:
         )
 
     def _load_update_offset(self) -> int:
+        # 봇 토큰별 offset을 DB에 저장 (토큰이 다르면 offset도 다름)
+        if self.user_id > 0 and self.token:
+            try:
+                import db as db_module
+                with db_module.get_db() as conn:
+                    row = conn.execute(
+                        "SELECT value FROM user_config WHERE user_id = ? AND key = ?",
+                        (self.user_id, "_tg_offset"),
+                    ).fetchone()
+                    return int(row["value"]) if row else 0
+            except Exception:
+                pass
+        # 레거시 파일
         if not self.UPDATES_OFFSET_FILE.exists():
             return 0
         try:
@@ -89,6 +102,13 @@ class TelegramNotifier:
             return 0
 
     def _save_update_offset(self, offset: int) -> None:
+        if self.user_id > 0:
+            try:
+                import db as db_module
+                db_module.set_user_config(self.user_id, "_tg_offset", str(offset))
+                return
+            except Exception:
+                pass
         self.UPDATES_OFFSET_FILE.write_text(str(offset), encoding="utf-8")
 
     def _handle_link_command(self, chat_id: str, text: str) -> None:
