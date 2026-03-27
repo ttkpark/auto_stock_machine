@@ -444,6 +444,8 @@ def get_traces(user_id: int, limit: int = 200, run_id: str = "") -> list[dict]:
         result = []
         for r in rows:
             d = dict(r)
+            # 템플릿 호환: created_at → time
+            d["time"] = d.get("created_at", "")
             try:
                 d["payload"] = json.loads(d["payload"])
             except Exception:
