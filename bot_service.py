@@ -138,16 +138,18 @@ def run_buy_logic(
         trace.record("buy_skipped", reason=msg)
         return
 
-    budget = int(balance * cfg.BUY_BUDGET_RATIO)
-    budget_per_stock = budget // max(1, len(agreed_stock_names))
+    total_budget = int(balance * cfg.BUY_BUDGET_RATIO)
+    remaining_budget = total_budget
+    remaining_stocks = len(agreed_stock_names)
     trace.record(
         "buy_budget_plan",
-        total_budget=budget,
-        stock_count=len(agreed_stock_names),
-        budget_per_stock=budget_per_stock,
+        total_budget=total_budget,
+        stock_count=remaining_stocks,
+        budget_per_stock=total_budget // max(1, remaining_stocks),
     )
 
-    bought_count = 0
+    # 종목 검증 및 현재가 조회 (가격 오름차순 정렬용)
+    buy_candidates = []
     for agreed_stock_name in agreed_stock_names:
         ticker = validator.verify_and_get_code(agreed_stock_name)
         if not ticker:
@@ -155,6 +157,7 @@ def run_buy_logic(
             logger.warning(msg)
             notifier.send(f"[매수 차단] {msg}")
             trace.record("buy_blocked", stock_name=agreed_stock_name, reason=msg)
+            remaining_stocks -= 1
             continue
 
         current_price = broker.get_current_price(ticker)
@@ -162,13 +165,24 @@ def run_buy_logic(
             msg = f"'{agreed_stock_name}' 현재가 조회 실패. 매수를 중단합니다."
             logger.error(msg)
             notifier.send(f"[매수 오류] {msg}")
-            trace.record(
-                "buy_error",
-                stock_name=agreed_stock_name,
-                ticker=ticker,
-                reason=msg,
-            )
+            trace.record("buy_error", stock_name=agreed_stock_name, ticker=ticker, reason=msg)
+            remaining_stocks -= 1
             continue
+
+        buy_candidates.append({"name": agreed_stock_name, "ticker": ticker, "price": current_price})
+
+    # 싼 종목부터 매수 시도 (예산 재분배 효과 극대화)
+    buy_candidates.sort(key=lambda c: c["price"])
+    remaining_stocks = len(buy_candidates)
+
+    bought_count = 0
+    for candidate in buy_candidates:
+        agreed_stock_name = candidate["name"]
+        ticker = candidate["ticker"]
+        current_price = candidate["price"]
+
+        # 남은 예산을 남은 종목 수로 재분배
+        budget_per_stock = remaining_budget // max(1, remaining_stocks)
 
         qty = budget_per_stock // current_price
         trace.record(
@@ -187,6 +201,7 @@ def run_buy_logic(
             logger.warning(msg)
             notifier.send(f"[매수 스킵] {msg}")
             trace.record("buy_skipped", stock_name=agreed_stock_name, reason=msg)
+            remaining_stocks -= 1
             continue
 
         ai_list = [r.ai_model for r in recommendations if r.stock_name == agreed_stock_name]
@@ -194,9 +209,11 @@ def run_buy_logic(
         logger.info(f"매수 주문: {agreed_stock_name} ({ticker}) {qty}주 @ {current_price:,}원")
 
         success = broker.buy_order(ticker=ticker, qty=qty)
+        spent = qty * current_price
         if success:
             bought_count += 1
-            HoldingsTracker().record_buy(ticker)
+            remaining_budget -= spent
+            HoldingsTracker(user_id=trace.user_id).record_buy(ticker)
             notifier.notify_buy_order(agreed_stock_name, ticker, qty, current_price)
             detail_msg = (
                 f"\n추천 AI: {', '.join(ai_list)}\n"
@@ -206,6 +223,7 @@ def run_buy_logic(
         else:
             notifier.send(f"[매수 실패] {agreed_stock_name} ({ticker}) {qty}주 주문 실패")
 
+        remaining_stocks -= 1
         trace.record(
             "buy_order_result",
             success=success,
