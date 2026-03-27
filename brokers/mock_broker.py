@@ -20,11 +20,11 @@ logger = logging.getLogger(__name__)
 class MockBroker(BaseBroker):
     BASE_URL = "https://openapivts.koreainvestment.com:29443"
 
-    def __init__(self, app_key: str = "", app_secret: str = "",
-                 account_number: str = "", user_id: int = 0):
-        self.app_key = app_key or os.environ.get("KIS_MOCK_APP_KEY", "")
-        self.app_secret = app_secret or os.environ.get("KIS_MOCK_APP_SECRET", "")
-        self.account_number = account_number or os.environ.get("KIS_MOCK_ACCOUNT_NUMBER", "")
+    def __init__(self, app_key: str | None = None, app_secret: str | None = None,
+                 account_number: str | None = None, user_id: int = 0):
+        self.app_key = app_key if app_key is not None else os.environ.get("KIS_MOCK_APP_KEY", "")
+        self.app_secret = app_secret if app_secret is not None else os.environ.get("KIS_MOCK_APP_SECRET", "")
+        self.account_number = account_number if account_number is not None else os.environ.get("KIS_MOCK_ACCOUNT_NUMBER", "")
         self.user_id = user_id
         self._access_token: Optional[str] = None
         self.last_order_error: str = ""

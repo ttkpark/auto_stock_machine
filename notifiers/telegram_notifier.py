@@ -17,9 +17,9 @@ class TelegramNotifier:
     SUBSCRIBERS_FILE = Path("data/telegram_subscribers.json")
     UPDATES_OFFSET_FILE = Path("data/telegram_updates_offset.txt")
 
-    def __init__(self, token: str = "", chat_id: str = "", user_id: int = 0):
-        self.token = token or os.environ.get("TELEGRAM_BOT_TOKEN", "")
-        self.chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID", "")
+    def __init__(self, token: str | None = None, chat_id: str | None = None, user_id: int = 0):
+        self.token = token if token is not None else os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        self.chat_id = chat_id if chat_id is not None else os.environ.get("TELEGRAM_CHAT_ID", "")
         self.user_id = user_id
 
         if not self.token:

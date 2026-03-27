@@ -289,19 +289,40 @@ def _append_action_history(action: str, status: str, detail: str, user_id: int =
     )
 
 
-def _parse_today_log_actions() -> List[str]:
+def _parse_today_log_actions(user_id: int = 0) -> List[str]:
     """
-    오늘 날짜 기준 핵심 로그를 추려서 액션 리스트로 반환합니다.
+    오늘 날짜 기준 핵심 로그를 사용자별 DB trace에서 추려 반환합니다.
     """
-    if not LOG_PATH.exists():
-        return []
+    import db as _db
     today = _cfg.now().strftime("%Y-%m-%d")
-    lines = LOG_PATH.read_text(encoding="utf-8", errors="ignore").splitlines()
-    keywords = ("[매수", "[매도", "[현황", "최종 결정", "손절", "치명적 오류")
+    traces = _db.get_traces(user_id, limit=200)
+    keywords = ("sell_", "buy_", "status_", "run_start", "run_end")
+    display_keywords = ("sell_final_decision", "sell_trailing_stop", "sell_stop_loss",
+                        "buy_order_result", "buy_skipped", "run_start", "run_end")
     filtered: List[str] = []
-    for line in lines:
-        if today in line and any(k in line for k in keywords):
-            filtered.append(line)
+    for t in reversed(traces):  # oldest first
+        ts = t.get("time", "")
+        if not ts.startswith(today):
+            continue
+        evt = t.get("event_type", "")
+        if evt not in display_keywords:
+            continue
+        payload = t.get("payload", {})
+        mode = t.get("mode", "")
+        # 사람이 읽기 쉬운 한 줄 요약
+        if evt == "run_start":
+            filtered.append(f"{ts} [INFO] bot_service: [{mode.replace('buy','매수').replace('sell','매도').replace('status','현황 보고')} 로직] 시작")
+        elif evt == "run_end":
+            filtered.append(f"{ts} [INFO] bot_service: [{mode.replace('buy','매수').replace('sell','매도').replace('status','현황 보고')} 로직] 완료")
+        elif evt == "sell_final_decision":
+            filtered.append(f"{ts} [INFO] bot_service: 최종 결정: {payload.get('stock_name','')} → {payload.get('action','')}")
+        elif evt == "buy_order_result":
+            status = "성공" if payload.get("success") else "실패"
+            filtered.append(f"{ts} [INFO] bot_service: 매수 {status}: {payload.get('stock_name','')} {payload.get('qty',0)}주")
+        elif evt == "buy_skipped":
+            filtered.append(f"{ts} [INFO] bot_service: 매수 스킵: {payload.get('stock_name','')}")
+        elif evt in ("sell_trailing_stop", "sell_stop_loss"):
+            filtered.append(f"{ts} [INFO] bot_service: 손절: {payload.get('stock_name','')}")
     return filtered[-80:]
 
 
@@ -383,18 +404,17 @@ def _server_status_snapshot() -> Dict[str, Any]:
 # ── AI 사용량 모니터링 ──────────────────────────────────────
 
 
-def _count_today_ai_calls() -> Dict[str, int]:
-    """오늘자 ai_traces.jsonl 에서 AI 엔진별 API 호출 횟수를 집계합니다."""
+def _count_today_ai_calls(user_id: int = 0) -> Dict[str, int]:
+    """오늘자 DB trace에서 AI 엔진별 API 호출 횟수를 집계합니다."""
+    import db as _db
     today_str = _cfg.now().strftime("%Y-%m-%d")
     counts: Dict[str, int] = {"Gemini": 0, "Claude": 0, "ChatGPT": 0}
-    if not AI_TRACE_PATH.exists():
-        return counts
     try:
-        for line in AI_TRACE_PATH.read_text(encoding="utf-8").splitlines():
-            if today_str not in line:
+        traces = _db.get_traces(user_id, limit=500)
+        for t in traces:
+            if not t.get("time", "").startswith(today_str):
                 continue
-            entry = json.loads(line)
-            analyzer = entry.get("payload", {}).get("analyzer", "")
+            analyzer = t.get("payload", {}).get("analyzer", "")
             if "Gemini" in analyzer:
                 counts["Gemini"] += 1
             elif "Claude" in analyzer:
@@ -498,12 +518,12 @@ def _check_gemini_usage() -> Dict[str, Any]:
         return {"provider": "Google Gemini", "status": "error", "model": model, "error": str(e)[:200]}
 
 
-def _check_all_ai_usage() -> Dict[str, Any]:
+def _check_all_ai_usage(user_id: int = 0) -> Dict[str, Any]:
     """모든 AI 제공자의 상태와 오늘 호출 횟수를 종합합니다."""
     providers = []
     for check_fn in (_check_anthropic_usage, _check_openai_usage, _check_gemini_usage):
         providers.append(check_fn())
-    today_calls = _count_today_ai_calls()
+    today_calls = _count_today_ai_calls(user_id=user_id)
     label_map = {"Anthropic Claude": "Claude", "OpenAI ChatGPT": "ChatGPT", "Google Gemini": "Gemini"}
     for p in providers:
         p["today_calls"] = today_calls.get(label_map.get(p["provider"], ""), 0)
@@ -877,7 +897,7 @@ def create_app() -> Flask:
         broker_data = _safe_broker_snapshot(user_id=g.user_id)
         env_values = _load_env_values(user_id=g.user_id)
         server = _server_status_snapshot()
-        today_actions = _parse_today_log_actions()
+        today_actions = _parse_today_log_actions(user_id=g.user_id)
         recent_history = _load_action_history(user_id=g.user_id)[-20:][::-1]
 
         return render_template(
@@ -960,7 +980,7 @@ def create_app() -> Flask:
     @_login_required
     def actions():
         history = _load_action_history(user_id=g.user_id)[::-1]
-        today_actions = _parse_today_log_actions()[::-1]
+        today_actions = _parse_today_log_actions(user_id=g.user_id)[::-1]
         return render_template("actions.html", history=history, today_actions=today_actions)
 
     @app.get("/ai")
@@ -1027,7 +1047,7 @@ def create_app() -> Flask:
     @app.get("/api/ai-usage")
     @_login_required
     def api_ai_usage():
-        return jsonify(_check_all_ai_usage())
+        return jsonify(_check_all_ai_usage(user_id=g.user_id))
 
     @app.get("/api/available-models")
     @_login_required

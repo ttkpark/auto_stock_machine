@@ -25,14 +25,15 @@ FALLBACK_MODEL_NAMES = [
 
 
 class ClaudeAnalyzer(BaseAnalyzer):
-    def __init__(self, api_key: str = "", model_name: str = ""):
-        api_key = api_key or os.environ.get("CLAUDE_API_KEY", "")
+    def __init__(self, api_key: str | None = None, model_name: str | None = None):
+        api_key = api_key if api_key is not None else os.environ.get("CLAUDE_API_KEY", "")
         if not api_key:
             raise EnvironmentError(
                 "CLAUDE_API_KEY 가 설정되어 있지 않습니다."
             )
         self.client = anthropic.Anthropic(api_key=api_key)
-        self.model_name = (model_name or os.environ.get("CLAUDE_MODEL_NAME", "")).strip() or DEFAULT_MODEL_NAME
+        model = model_name if model_name is not None else os.environ.get("CLAUDE_MODEL_NAME", "")
+        self.model_name = model.strip() or DEFAULT_MODEL_NAME
         self.last_recommendation_error = ""
         logger.info(f"[ClaudeAnalyzer] 초기화 완료 (모델: {self.model_name})")
 
