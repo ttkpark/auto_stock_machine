@@ -66,9 +66,9 @@ class RealBroker(BaseBroker):
     #  계좌 정보
     # ------------------------------------------------------------------ #
     def get_balance(self) -> int:
-        url = f"{self.BASE_URL}/uapi/domestic-stock/v1/trading/inquire-balance"
+        url = f"{self.BASE_URL}/uapi/domestic-stock/v1/trading/inquire-psbl-order"
         headers = self._headers()
-        headers["tr_id"] = "TTTC8434R"  # 실전투자 잔고 조회
+        headers["tr_id"] = "TTTC8908R"  # 실전투자 주문 가능 금액 조회
 
         account_prefix = self.account_number[:8]
         account_suffix = self.account_number[8:]
@@ -76,27 +76,23 @@ class RealBroker(BaseBroker):
         params = {
             "CANO": account_prefix,
             "ACNT_PRDT_CD": account_suffix,
-            "AFHR_FLPR_YN": "N",
-            "OFL_YN": "",
-            "INQR_DVSN": "02",
-            "UNPR_DVSN": "01",
-            "FUND_STTL_ICLD_YN": "N",
-            "FNCG_AMT_AUTO_RDPT_YN": "N",
-            "PRCS_DVSN": "01",
-            "CTX_AREA_FK100": "",
-            "CTX_AREA_NK100": "",
+            "PDNO": "005930",
+            "ORD_UNPR": "0",
+            "ORD_DVSN": "01",
+            "CMA_EVLU_AMT_ICLD_YN": "Y",
+            "OVRS_ICLD_YN": "N",
         }
         resp = requests.get(url, headers=headers, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
 
-        output2 = data.get("output2")
-        if not isinstance(output2, list) or not output2:
-            logger.error(f"[RealBroker] 잔고 조회 output2 누락 | raw={data}")
+        output = data.get("output")
+        if not isinstance(output, dict):
+            logger.error(f"[RealBroker] 주문 가능 금액 조회 output 누락 | raw={data}")
             return 0
 
-        balance = int(float(output2[0].get("dnca_tot_amt", 0)))
-        logger.info(f"[RealBroker] 예수금총금액: {balance:,}원")
+        balance = int(float(output.get("ord_psbl_cash", 0)))
+        logger.info(f"[RealBroker] 주문가능현금: {balance:,}원")
         return balance
 
     def get_holdings(self) -> list[dict]:
