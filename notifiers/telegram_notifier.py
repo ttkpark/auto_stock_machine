@@ -118,6 +118,9 @@ class TelegramNotifier:
 
             db_module.add_telegram_subscriber(user_id, chat_id)
             db_module.set_user_config(user_id, "TELEGRAM_CHAT_ID", chat_id)
+            # 봇 토큰도 함께 설정 (같은 봇을 공유)
+            if self.token:
+                db_module.set_user_config(user_id, "TELEGRAM_BOT_TOKEN", self.token)
             self._send_to_chat(
                 chat_id,
                 f"'{username}' 계정에 연결되었습니다.\n"
