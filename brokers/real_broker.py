@@ -38,8 +38,34 @@ class RealBroker(BaseBroker):
     # ------------------------------------------------------------------ #
     #  인증 토큰
     # ------------------------------------------------------------------ #
+    def _load_cached_token(self) -> str | None:
+        if self.user_id > 0:
+            try:
+                import db as db_module
+                cached = db_module.get_cached_token(self.user_id, "real")
+                if cached:
+                    return cached["access_token"]
+            except Exception:
+                pass
+        return None
+
+    def _save_cached_token(self, token: str, expires_in: int) -> None:
+        import time
+        safe_expires_at = int(time.time()) + max(0, int(expires_in) - 60)
+        if self.user_id > 0:
+            try:
+                import db as db_module
+                db_module.save_cached_token(self.user_id, "real", token, safe_expires_at)
+            except Exception:
+                pass
+
     def get_access_token(self) -> str:
         if self._access_token:
+            return self._access_token
+
+        cached = self._load_cached_token()
+        if cached:
+            self._access_token = cached
             return self._access_token
 
         url = f"{self.BASE_URL}/oauth2/tokenP"
@@ -50,7 +76,9 @@ class RealBroker(BaseBroker):
         }
         resp = requests.post(url, json=payload, timeout=10)
         resp.raise_for_status()
-        self._access_token = resp.json()["access_token"]
+        data = resp.json()
+        self._access_token = data["access_token"]
+        self._save_cached_token(self._access_token, int(data.get("expires_in", 21600)))
         logger.info("[RealBroker] 액세스 토큰 발급 성공.")
         return self._access_token
 
