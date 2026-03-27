@@ -1267,6 +1267,15 @@ def create_app() -> Flask:
         flash("사용자가 삭제되었습니다.", "success")
         return redirect(url_for("admin_users"))
 
+    # ── 텔레그램 OTP 생성 ──────────────────────────
+
+    @app.post("/api/telegram-otp")
+    @_login_required
+    def generate_telegram_otp():
+        import db as db_module
+        code = db_module.create_telegram_otp(g.user_id)
+        return jsonify({"ok": True, "code": code, "expires_in": 300})
+
     # ── context processor: 모든 템플릿에 사용자 정보 주입 ──
     @app.context_processor
     def inject_user():

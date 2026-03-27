@@ -119,6 +119,13 @@ CREATE TABLE IF NOT EXISTS token_cache (
     expires_at   INTEGER NOT NULL,
     UNIQUE(user_id, broker_type)
 );
+
+CREATE TABLE IF NOT EXISTS telegram_otp (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code       TEXT NOT NULL UNIQUE,
+    expires_at INTEGER NOT NULL
+);
 """
 
 
@@ -634,3 +641,38 @@ def save_cached_token(user_id: int, broker_type: str, access_token: str, expires
             "VALUES (?, ?, ?, ?)",
             (user_id, broker_type, access_token, expires_at),
         )
+
+
+# ------------------------------------------------------------------
+# Telegram OTP
+# ------------------------------------------------------------------
+
+def create_telegram_otp(user_id: int, ttl_seconds: int = 300) -> str:
+    """사용자를 위한 6자리 OTP를 생성합니다. 기본 5분 유효."""
+    import secrets
+    code = secrets.token_hex(3).upper()  # 6자리 hex
+    expires_at = int(time.time()) + ttl_seconds
+    with get_db() as conn:
+        # 기존 OTP 삭제
+        conn.execute("DELETE FROM telegram_otp WHERE user_id = ?", (user_id,))
+        conn.execute(
+            "INSERT INTO telegram_otp (user_id, code, expires_at) VALUES (?, ?, ?)",
+            (user_id, code, expires_at),
+        )
+    return code
+
+
+def verify_telegram_otp(code: str) -> int | None:
+    """OTP 코드를 검증하고 성공 시 user_id를 반환합니다. 실패/만료 시 None."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT user_id, expires_at FROM telegram_otp WHERE code = ?", (code,)
+        ).fetchone()
+        if not row:
+            return None
+        if row["expires_at"] < int(time.time()):
+            conn.execute("DELETE FROM telegram_otp WHERE code = ?", (code,))
+            return None
+        # 사용 후 삭제 (일회용)
+        conn.execute("DELETE FROM telegram_otp WHERE code = ?", (code,))
+        return row["user_id"]

@@ -80,6 +80,31 @@
   </form>
 </div>
 
+<div class="card" style="margin-top:14px;">
+  <h2>텔레그램 연결</h2>
+  <div class="sub">텔레그램 봇에서 아래 OTP 코드를 입력하면 이 계정에 알림이 연결됩니다.</div>
+  <div style="margin-top:12px; display:flex; gap:10px; align-items:center;">
+    <button class="btn btn-primary" type="button" onclick="generateOTP()">OTP 생성 (5분 유효)</button>
+    <code id="otp-code" style="font-size:24px; letter-spacing:4px; padding:6px 14px; background:#f2f4f9; border-radius:6px; display:none;"></code>
+  </div>
+  <div class="sub" style="margin-top:8px;">
+    봇에게 보내기: <code>연결 &lt;OTP코드&gt;</code>
+  </div>
+  <script>
+  function generateOTP() {
+    fetch('/api/telegram-otp', {method:'POST'})
+      .then(r => r.json())
+      .then(d => {
+        if (d.ok) {
+          const el = document.getElementById('otp-code');
+          el.textContent = d.code;
+          el.style.display = 'inline-block';
+        }
+      });
+  }
+  </script>
+</div>
+
 <script>
 function toggleCustomInput(key, value) {
   var customEl = document.getElementById('custom-' + key);

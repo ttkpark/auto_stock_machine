@@ -92,43 +92,42 @@ class TelegramNotifier:
         self.UPDATES_OFFSET_FILE.write_text(str(offset), encoding="utf-8")
 
     def _handle_link_command(self, chat_id: str, text: str) -> None:
-        """텔레그램에서 '연결 username password'로 계정을 연결합니다."""
-        parts = text.split(maxsplit=2)
-        if len(parts) < 3:
+        """텔레그램에서 OTP 코드로 계정을 연결합니다.
+        사용법: 연결 OTP코드 (웹 환경설정에서 생성)"""
+        parts = text.split()
+        if len(parts) < 2:
             self._send_to_chat(
                 chat_id,
-                "사용법: 연결 사용자명 비밀번호\n예: 연결 ghpark mypassword",
+                "사용법: 연결 OTP코드\n\n"
+                "OTP 코드는 웹 대시보드 > 환경설정 > 텔레그램 연결에서 생성할 수 있습니다.\n"
+                "코드는 5분간 유효합니다.",
             )
             return
 
-        _, username, password = parts
+        code = parts[1].strip().upper()
         try:
             import db as db_module
-            from auth import verify_password
 
-            user = db_module.get_user_by_username(username)
-            if not user or not user["is_active"]:
-                self._send_to_chat(chat_id, "사용자를 찾을 수 없습니다.")
+            user_id = db_module.verify_telegram_otp(code)
+            if user_id is None:
+                self._send_to_chat(chat_id, "OTP 코드가 유효하지 않거나 만료되었습니다.\n웹에서 새 코드를 생성해 주세요.")
                 return
 
-            if not verify_password(password, user["password_hash"]):
-                self._send_to_chat(chat_id, "비밀번호가 일치하지 않습니다.")
-                return
+            user = db_module.get_user_by_id(user_id)
+            username = user["username"] if user else "?"
 
-            user_id = user["id"]
             db_module.add_telegram_subscriber(user_id, chat_id)
-            # TELEGRAM_CHAT_ID도 설정
             db_module.set_user_config(user_id, "TELEGRAM_CHAT_ID", chat_id)
             self._send_to_chat(
                 chat_id,
                 f"'{username}' 계정에 연결되었습니다.\n"
                 f"이제 매수/매도/현황 알림을 받습니다.",
             )
-            logger.info(f"[Telegram] 계정 연결: {username} ← chat_id={chat_id}")
+            logger.info(f"[Telegram] OTP 계정 연결: {username} ← chat_id={chat_id}")
 
         except Exception as e:
             logger.error(f"[Telegram] 계정 연결 오류: {e}")
-            self._send_to_chat(chat_id, f"연결 중 오류가 발생했습니다: {e}")
+            self._send_to_chat(chat_id, f"연결 중 오류가 발생했습니다.")
 
     def _send_to_chat(self, chat_id: str, message: str) -> bool:
         url = self._api_url("sendMessage")
@@ -198,8 +197,9 @@ class TelegramNotifier:
                     chat_id,
                     "Auto Stock Bot에 오신 것을 환영합니다.\n\n"
                     "계정을 연결하려면:\n"
-                    "  연결 사용자명 비밀번호\n\n"
-                    "예: 연결 ghpark mypassword",
+                    "1. 웹 대시보드 > 환경설정 하단에서 OTP 생성\n"
+                    "2. 여기에 입력: 연결 OTP코드\n\n"
+                    "예: 연결 A1B2C3",
                 )
                 logger.info(f"[Telegram] 구독 등록: {chat_id}")
             elif text == "end":
