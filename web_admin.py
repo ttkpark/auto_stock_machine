@@ -250,6 +250,10 @@ def _safe_broker_snapshot(user_id: int = 0) -> Dict[str, Any]:
             total_eval += eval_amount
             total_profit += profit_amount
 
+        # 브로커가 tot_evlu_amt(총 평가 금액)을 제공하면 사용 (CMA 등 포함)
+        broker_total = getattr(broker, "tot_evlu_amt", 0)
+        total_assets = broker_total if broker_total > 0 else balance + total_eval
+
         result.update(
             {
                 "ok": True,
@@ -257,7 +261,7 @@ def _safe_broker_snapshot(user_id: int = 0) -> Dict[str, Any]:
                 "holdings": holdings,
                 "total_eval_amount": total_eval,
                 "total_profit_amount": total_profit,
-                "total_assets": balance + total_eval,
+                "total_assets": total_assets,
             }
         )
     except Exception as e:

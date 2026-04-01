@@ -165,6 +165,14 @@ class RealBroker(BaseBroker):
                 "current_price": int(float(item.get("prpr", 0))),
                 "profit_rate": float(item.get("evlu_pfls_rt", 0.0)),
             })
+
+        # output2에서 총 평가 금액을 인스턴스에 저장 (대시보드용)
+        output2 = data.get("output2", [])
+        if output2 and isinstance(output2, list) and output2[0]:
+            self.tot_evlu_amt = int(float(output2[0].get("tot_evlu_amt", 0)))
+        else:
+            self.tot_evlu_amt = 0
+
         return holdings
 
     def get_current_price(self, ticker: str) -> Optional[int]:
