@@ -68,7 +68,9 @@
   </style>
 
   <script>
-    let activeRunId = "{{ state.run_id }}";
+    // URL 파라미터에서 run_id를 받으면 해당 실행 기록으로 이동
+    const urlParams = new URLSearchParams(window.location.search);
+    let activeRunId = urlParams.get('run_id') || "{{ state.run_id }}";
     let lastTraces = [];
 
     async function startAction(action) {
@@ -123,6 +125,7 @@
         case "sell_ai_decision":
           lines.push(`<b>[${p.ai_model}]</b> ${p.stock_name} → <b class="${p.action==='매도'?'bad':'ok'}">${p.action}</b>`);
           lines.push(`사유: ${esc(p.reason)}`);
+          if (p.prompt) lines.push(`<details><summary style="cursor:pointer;font-size:12px;color:#5a6474;">전송된 프롬프트 보기</summary><pre class="payload">${esc(p.prompt)}</pre></details>`);
           break;
         case "sell_final_decision":
           lines.push(`<b>${p.stock_name}</b> 최종 → <b class="${p.action==='매도'?'bad':'ok'}">${p.action}</b>`);
@@ -154,6 +157,11 @@
         case "buy_recommendation":
           lines.push(`<b>[${p.ai_model}]</b> 추천: <b>${p.stock_name || ""}</b>`);
           if (p.reason) lines.push(`사유: ${esc(p.reason)}`);
+          if (p.prompt) lines.push(`<details><summary style="cursor:pointer;font-size:12px;color:#5a6474;">전송된 프롬프트 보기</summary><pre class="payload">${esc(p.prompt)}</pre></details>`);
+          break;
+        case "buy_recommendation_empty":
+          lines.push(`<b>[${p.analyzer}]</b> 추천 없음: ${esc(p.reason)}`);
+          if (p.prompt) lines.push(`<details><summary style="cursor:pointer;font-size:12px;color:#5a6474;">전송된 프롬프트 보기</summary><pre class="payload">${esc(p.prompt)}</pre></details>`);
           break;
         case "buy_order_result":
           lines.push(`${p.stock_name} (${p.ticker}) ${p.qty}주 @ ${num(p.current_price)} ${p.success ? '<b class="ok">매수 성공</b>' : '<b class="bad">매수 실패</b>'}`);

@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>체결 내역</h2>
+  <p class="sub">모든 매수/매도 체결 기록을 계정별로 관리합니다. AI 판단 내역도 함께 조회할 수 있습니다.</p>
+
+  <div style="display:flex; gap:8px; margin:12px 0; flex-wrap:wrap;">
+    <input type="text" id="filter-ticker" placeholder="티커 필터" style="padding:6px; border:1px solid #ccc; border-radius:4px; width:120px;">
+    <select id="filter-action" style="padding:6px; border:1px solid #ccc; border-radius:4px;">
+      <option value="">전체</option>
+      <option value="buy">매수</option>
+      <option value="sell">매도</option>
+    </select>
+    <button class="btn btn-primary" onclick="loadTrades()">조회</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>시간</th>
+        <th>종류</th>
+        <th>종목</th>
+        <th>티커</th>
+        <th>수량</th>
+        <th>가격</th>
+        <th>총액</th>
+        <th>수익률</th>
+        <th>사유</th>
+        <th>AI</th>
+      </tr>
+    </thead>
+    <tbody id="trade-list">
+      <tr><td colspan="10" style="text-align:center;color:#888;">로딩 중...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- AI 판단 상세 모달 -->
+<div id="ai-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.4); z-index:999;">
+  <div class="card" style="max-width:700px; margin:auto; margin-top:8vh; max-height:80vh; overflow-y:auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h2>AI 판단 상세</h2>
+      <button class="btn btn-gray" onclick="hideAiModal()" style="padding:4px 12px;">닫기</button>
+    </div>
+    <div id="ai-modal-content"></div>
+  </div>
+</div>
+
+<style>
+  #ai-modal[data-show="1"] { display: flex; }
+  .ai-decision { padding:8px; margin:6px 0; background:#f9fbff; border-radius:6px; border-left:3px solid #1e66f5; }
+  .ai-decision.sell { border-left-color: #d53f3f; }
+  .prompt-box { background:#f2f4f9; padding:10px; border-radius:6px; margin:8px 0; font-family:monospace; font-size:12px; white-space:pre-wrap; max-height:300px; overflow-y:auto; }
+</style>
+
+<script>
+async function loadTrades() {
+  const ticker = document.getElementById('filter-ticker').value.trim();
+  const params = new URLSearchParams({limit: '200'});
+  if (ticker) params.set('ticker', ticker);
+  const resp = await fetch('/api/v1/trades?' + params);
+  const data = await resp.json();
+  const tbody = document.getElementById('trade-list');
+  if (!data.ok || !data.trades.length) {
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#888;">체결 내역 없음</td></tr>';
+    return;
+  }
+  // 클라이언트 필터
+  let trades = data.trades;
+  const actionFilter = document.getElementById('filter-action').value;
+  if (actionFilter) trades = trades.filter(t => t.action === actionFilter);
+
+  tbody.innerHTML = trades.map(t => {
+    const hasAi = t.ai_decisions && Object.keys(t.ai_decisions).length > 0;
+    const profitStr = t.profit_rate != null ? `<span class="${t.profit_rate >= 0 ? 'ok':'bad'}">${t.profit_rate.toFixed(1)}%</span>` : '-';
+    return `
+    <tr>
+      <td style="font-size:12px;">${t.created_at}</td>
+      <td><span class="${t.action==='buy' ? 'ok':'bad'}">${t.action==='buy' ? '매수':'매도'}</span></td>
+      <td><b>${t.stock_name || '-'}</b></td>
+      <td>${t.ticker}</td>
+      <td>${t.qty}주</td>
+      <td>${(t.price||0).toLocaleString()}원</td>
+      <td>${(t.total_amount||0).toLocaleString()}원</td>
+      <td>${profitStr}</td>
+      <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;">${t.reason || '-'}</td>
+      <td>${hasAi ? `<button class="btn btn-primary" style="padding:3px 8px;font-size:11px;" onclick="showAiDetail(${t.id})">AI 상세</button>` : '-'}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function showAiDetail(tradeId) {
+  const resp = await fetch(`/api/v1/trades/${tradeId}`);
+  const data = await resp.json();
+  if (!data.ok) { alert(data.error); return; }
+
+  const trade = data.trade;
+  const traces = data.ai_traces || [];
+
+  let html = `
+    <div style="margin-bottom:10px;">
+      <b>${trade.action === 'buy' ? '매수' : '매도'}</b> | ${trade.stock_name || trade.ticker} | ${trade.qty}주 @ ${(trade.price||0).toLocaleString()}원
+      <br><span class="sub">${trade.created_at} | run_id: ${trade.run_id || '-'}</span>
+    </div>
+  `;
+
+  // AI 판단 내역
+  const aiDec = trade.ai_decisions || {};
+  if (aiDec.decisions) {
+    html += '<h3 style="font-size:14px;">AI 투표 결과</h3>';
+    aiDec.decisions.forEach(d => {
+      html += `<div class="ai-decision ${d.action === '매도' ? 'sell' : ''}">
+        <b>${d.ai_model}</b>: ${d.action} — ${d.reason}
+      </div>`;
+    });
+    if (aiDec.final) {
+      html += `<p><b>최종 결정:</b> ${aiDec.final}</p>`;
+    }
+  } else if (aiDec.ai_models) {
+    html += `<p><b>추천 AI:</b> ${aiDec.ai_models.join(', ')}</p>`;
+    if (aiDec.reasons) html += `<p><b>이유:</b> ${aiDec.reasons.join(' / ')}</p>`;
+  }
+
+  // 관련 AI Traces에서 프롬프트 추출
+  const promptTraces = traces.filter(t => t.payload && t.payload.prompt);
+  if (promptTraces.length) {
+    html += '<h3 style="font-size:14px; margin-top:12px;">AI에게 전송된 프롬프트</h3>';
+    promptTraces.forEach(t => {
+      html += `
+        <div style="margin:4px 0;">
+          <span class="sub">${t.payload.ai_model || t.payload.analyzer || ''} | ${t.event_type}</span>
+          <div class="prompt-box">${escapeHtml(t.payload.prompt)}</div>
+        </div>
+      `;
+    });
+  }
+
+  // 연관 run_id가 있으면 AI 상세 페이지 링크
+  if (trade.run_id) {
+    html += `<div style="margin-top:12px;">
+      <a href="/ai?run_id=${trade.run_id}" class="btn btn-primary" style="text-decoration:none; display:inline-block;">AI 상세 페이지에서 보기</a>
+    </div>`;
+  }
+
+  document.getElementById('ai-modal-content').innerHTML = html;
+  document.getElementById('ai-modal').dataset.show = "1";
+}
+
+function hideAiModal() { document.getElementById('ai-modal').dataset.show = ""; }
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+loadTrades();
+</script>
+{% endblock %}

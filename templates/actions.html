@@ -24,7 +24,16 @@
               <td>{{ row.time }}</td>
               <td>{{ row.action }}</td>
               <td class="{% if row.status == 'success' %}ok{% else %}bad{% endif %}">{{ row.status }}</td>
-              <td><code>{{ row.detail }}</code></td>
+              <td>
+                <code>{{ row.detail }}</code>
+                {% set ns = namespace(run_id='') %}
+                {% if 'run_id=' in (row.detail or '') %}
+                  {% set ns.run_id = row.detail.split('run_id=')[1].split(']')[0].split(' ')[0] %}
+                {% endif %}
+                {% if ns.run_id %}
+                  <a href="/ai?run_id={{ ns.run_id }}" style="margin-left:6px; font-size:12px;">AI 상세 보기</a>
+                {% endif %}
+              </td>
             </tr>
           {% endfor %}
           </tbody>

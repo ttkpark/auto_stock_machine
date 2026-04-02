@@ -126,6 +126,53 @@ CREATE TABLE IF NOT EXISTS telegram_otp (
     code       TEXT NOT NULL UNIQUE,
     expires_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS bots (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    bot_type   TEXT NOT NULL DEFAULT 'buy_auto',
+    enabled    INTEGER NOT NULL DEFAULT 1,
+    config     TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bots_user ON bots(user_id);
+
+CREATE TABLE IF NOT EXISTS trade_log (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    bot_id        INTEGER REFERENCES bots(id),
+    action        TEXT NOT NULL,
+    ticker        TEXT NOT NULL,
+    stock_name    TEXT NOT NULL DEFAULT '',
+    qty           INTEGER NOT NULL DEFAULT 0,
+    price         INTEGER NOT NULL DEFAULT 0,
+    total_amount  INTEGER NOT NULL DEFAULT 0,
+    profit_rate   REAL,
+    profit_amount INTEGER,
+    reason        TEXT NOT NULL DEFAULT '',
+    ai_decisions  TEXT NOT NULL DEFAULT '{}',
+    status        TEXT NOT NULL DEFAULT 'success',
+    run_id        TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_trade_log_user ON trade_log(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_trade_log_bot ON trade_log(bot_id);
+
+CREATE TABLE IF NOT EXISTS monitor_config (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id              INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    enabled              INTEGER NOT NULL DEFAULT 0,
+    check_interval_sec   INTEGER NOT NULL DEFAULT 300,
+    profit_threshold     REAL NOT NULL DEFAULT 5.0,
+    loss_threshold       REAL NOT NULL DEFAULT -3.0,
+    volatility_threshold REAL NOT NULL DEFAULT 3.0,
+    auto_sell_enabled    INTEGER NOT NULL DEFAULT 0,
+    notify_on_threshold  INTEGER NOT NULL DEFAULT 1,
+    created_at           TEXT NOT NULL,
+    updated_at           TEXT NOT NULL
+);
 """
 
 
@@ -379,6 +426,7 @@ def delete_user(user_id: int) -> None:
     with get_db() as conn:
         # CASCADE가 작동하지 않을 수 있으므로 관련 데이터를 먼저 삭제
         for table in (
+            "trade_log", "bots", "monitor_config",
             "user_config", "ai_traces", "action_history", "holdings_tracker",
             "schedule_config", "telegram_subscribers", "user_prompts", "token_cache",
         ):
@@ -676,3 +724,202 @@ def verify_telegram_otp(code: str) -> int | None:
         # 사용 후 삭제 (일회용)
         conn.execute("DELETE FROM telegram_otp WHERE code = ?", (code,))
         return row["user_id"]
+
+
+# ------------------------------------------------------------------
+# Bots (봇 인스턴스 관리)
+# ------------------------------------------------------------------
+
+def create_bot(user_id: int, name: str, bot_type: str = "buy_auto",
+               enabled: bool = True, config: dict | None = None) -> int:
+    import config as cfg_module
+    now_str = cfg_module.now().strftime("%Y-%m-%d %H:%M:%S")
+    config_json = json.dumps(config or {}, ensure_ascii=False)
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO bots (user_id, name, bot_type, enabled, config, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, name, bot_type, 1 if enabled else 0, config_json, now_str, now_str),
+        )
+        return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+
+def get_bot(bot_id: int) -> dict | None:
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM bots WHERE id = ?", (bot_id,)).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d["config"] = json.loads(d["config"])
+        except Exception:
+            d["config"] = {}
+        return d
+
+
+def get_user_bots(user_id: int) -> list[dict]:
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM bots WHERE user_id = ? ORDER BY id", (user_id,)
+        ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["config"] = json.loads(d["config"])
+            except Exception:
+                d["config"] = {}
+            result.append(d)
+        return result
+
+
+def update_bot(bot_id: int, **fields) -> None:
+    import config as cfg_module
+    allowed = {"name", "bot_type", "enabled", "config"}
+    updates = {}
+    for k, v in fields.items():
+        if k not in allowed:
+            continue
+        if k == "config" and isinstance(v, dict):
+            updates[k] = json.dumps(v, ensure_ascii=False)
+        elif k == "enabled":
+            updates[k] = 1 if v else 0
+        else:
+            updates[k] = v
+    if not updates:
+        return
+    updates["updated_at"] = cfg_module.now().strftime("%Y-%m-%d %H:%M:%S")
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    with get_db() as conn:
+        conn.execute(f"UPDATE bots SET {set_clause} WHERE id = ?", (*updates.values(), bot_id))
+
+
+def delete_bot(bot_id: int) -> None:
+    with get_db() as conn:
+        conn.execute("DELETE FROM bots WHERE id = ?", (bot_id,))
+
+
+# ------------------------------------------------------------------
+# Trade Log (체결 내역)
+# ------------------------------------------------------------------
+
+def insert_trade_log(user_id: int, action: str, ticker: str, stock_name: str = "",
+                     qty: int = 0, price: int = 0, profit_rate: float | None = None,
+                     profit_amount: int | None = None, reason: str = "",
+                     ai_decisions: dict | None = None, status: str = "success",
+                     run_id: str = "", bot_id: int | None = None) -> int:
+    import config as cfg_module
+    now_str = cfg_module.now().strftime("%Y-%m-%d %H:%M:%S")
+    total_amount = qty * price
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO trade_log "
+            "(user_id, bot_id, action, ticker, stock_name, qty, price, total_amount, "
+            " profit_rate, profit_amount, reason, ai_decisions, status, run_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, bot_id, action, ticker, stock_name, qty, price, total_amount,
+             profit_rate, profit_amount, reason,
+             json.dumps(ai_decisions or {}, ensure_ascii=False),
+             status, run_id, now_str),
+        )
+        return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+
+def get_trade_logs(user_id: int, limit: int = 200, bot_id: int | None = None,
+                   ticker: str = "") -> list[dict]:
+    with get_db() as conn:
+        conditions = ["user_id = ?"]
+        params: list = [user_id]
+        if bot_id is not None:
+            conditions.append("bot_id = ?")
+            params.append(bot_id)
+        if ticker:
+            conditions.append("ticker = ?")
+            params.append(ticker)
+        where = " AND ".join(conditions)
+        params.append(limit)
+        rows = conn.execute(
+            f"SELECT * FROM trade_log WHERE {where} ORDER BY id DESC LIMIT ?", params
+        ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["ai_decisions"] = json.loads(d["ai_decisions"])
+            except Exception:
+                d["ai_decisions"] = {}
+            result.append(d)
+        return result
+
+
+def get_trade_log_by_id(trade_id: int) -> dict | None:
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM trade_log WHERE id = ?", (trade_id,)).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d["ai_decisions"] = json.loads(d["ai_decisions"])
+        except Exception:
+            d["ai_decisions"] = {}
+        return d
+
+
+# ------------------------------------------------------------------
+# Monitor Config (모니터링 설정)
+# ------------------------------------------------------------------
+
+def get_monitor_config(user_id: int) -> dict | None:
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM monitor_config WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def save_monitor_config(user_id: int, enabled: bool = False,
+                        check_interval_sec: int = 300,
+                        profit_threshold: float = 5.0,
+                        loss_threshold: float = -3.0,
+                        volatility_threshold: float = 3.0,
+                        auto_sell_enabled: bool = False,
+                        notify_on_threshold: bool = True) -> None:
+    import config as cfg_module
+    now_str = cfg_module.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT id FROM monitor_config WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE monitor_config SET enabled=?, check_interval_sec=?, "
+                "profit_threshold=?, loss_threshold=?, volatility_threshold=?, "
+                "auto_sell_enabled=?, notify_on_threshold=?, updated_at=? "
+                "WHERE user_id=?",
+                (1 if enabled else 0, check_interval_sec,
+                 profit_threshold, loss_threshold, volatility_threshold,
+                 1 if auto_sell_enabled else 0, 1 if notify_on_threshold else 0,
+                 now_str, user_id),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO monitor_config "
+                "(user_id, enabled, check_interval_sec, profit_threshold, loss_threshold, "
+                " volatility_threshold, auto_sell_enabled, notify_on_threshold, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (user_id, 1 if enabled else 0, check_interval_sec,
+                 profit_threshold, loss_threshold, volatility_threshold,
+                 1 if auto_sell_enabled else 0, 1 if notify_on_threshold else 0,
+                 now_str, now_str),
+            )
+
+
+def get_all_active_monitors() -> list[dict]:
+    """활성화된 모든 사용자의 모니터 설정을 반환합니다."""
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT m.*, u.username FROM monitor_config m "
+            "JOIN users u ON m.user_id = u.id "
+            "WHERE m.enabled = 1 AND u.is_active = 1"
+        ).fetchall()
+        return [dict(r) for r in rows]

@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid-2">
+  <div class="card">
+    <h2>수동 매매</h2>
+    <p class="sub">종목을 검색하고 직접 매수/매도 주문을 실행합니다.</p>
+
+    <!-- 종목 검색 -->
+    <div style="margin:12px 0;">
+      <label><b>종목 검색</b></label>
+      <div style="display:flex; gap:8px; margin-top:4px;">
+        <input type="text" id="stock-name" placeholder="종목명 (예: 삼성전자)"
+               style="flex:1; padding:8px; border:1px solid #ccc; border-radius:4px;">
+        <button class="btn btn-primary" onclick="searchStock()">검색</button>
+      </div>
+    </div>
+
+    <div id="stock-info" style="display:none; margin:12px 0; padding:12px; background:#f9fbff; border-radius:6px;">
+      <div style="display:flex; justify-content:space-between;">
+        <div>
+          <b id="si-name"></b> <span class="sub" id="si-ticker"></span>
+        </div>
+        <div class="kpi" id="si-price" style="font-size:20px;"></div>
+      </div>
+    </div>
+
+    <!-- 주문 입력 -->
+    <div id="order-form" style="display:none;">
+      <div style="margin:8px 0;">
+        <label><b>주문 수량</b></label>
+        <div style="display:flex; gap:8px; margin-top:4px; align-items:center;">
+          <input type="number" id="order-qty" min="1" value="1"
+                 style="width:120px; padding:8px; border:1px solid #ccc; border-radius:4px;">
+          <span class="sub">주</span>
+          <span class="sub" id="order-total"></span>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:8px; margin-top:12px;">
+        <button class="btn btn-primary" onclick="executeTrade('buy')" style="flex:1;">
+          매수 주문
+        </button>
+        <button class="btn btn-danger" onclick="executeTrade('sell')" style="flex:1;">
+          매도 주문
+        </button>
+      </div>
+    </div>
+
+    <div id="trade-result" style="display:none; margin-top:12px; padding:12px; border-radius:6px;"></div>
+  </div>
+
+  <div class="card">
+    <h2>보유 종목</h2>
+    <p class="sub">현재 보유 중인 종목입니다. 클릭하면 매도 주문 폼이 채워집니다.</p>
+    <table>
+      <thead>
+        <tr><th>종목명</th><th>티커</th><th>수량</th><th>현재가</th><th>수익률</th><th></th></tr>
+      </thead>
+      <tbody id="holdings-list">
+        <tr><td colspan="6" style="text-align:center;color:#888;">로딩 중...</td></tr>
+      </tbody>
+    </table>
+
+    <h2 style="margin-top:16px;">최근 체결 내역</h2>
+    <table>
+      <thead>
+        <tr><th>시간</th><th>종류</th><th>종목</th><th>수량</th><th>가격</th><th>상태</th></tr>
+      </thead>
+      <tbody id="recent-trades">
+        <tr><td colspan="6" style="text-align:center;color:#888;">로딩 중...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let currentTicker = '';
+let currentPrice = 0;
+let currentName = '';
+
+async function searchStock() {
+  const name = document.getElementById('stock-name').value.trim();
+  if (!name) { alert('종목명을 입력하세요.'); return; }
+
+  const resp = await fetch('/api/v1/trade/search-stock', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name})
+  });
+  const data = await resp.json();
+  if (!data.ok) { alert(data.error); return; }
+
+  currentTicker = data.ticker;
+  currentPrice = data.current_price;
+  currentName = data.name;
+
+  document.getElementById('si-name').textContent = data.name;
+  document.getElementById('si-ticker').textContent = data.ticker;
+  document.getElementById('si-price').textContent = (data.current_price || 0).toLocaleString() + '원';
+  document.getElementById('stock-info').style.display = 'block';
+  document.getElementById('order-form').style.display = 'block';
+  document.getElementById('order-qty').value = 1;
+  updateTotal();
+}
+
+function updateTotal() {
+  const qty = parseInt(document.getElementById('order-qty').value) || 0;
+  document.getElementById('order-total').textContent = `= ${(qty * currentPrice).toLocaleString()}원`;
+}
+document.getElementById('order-qty').addEventListener('input', updateTotal);
+
+async function executeTrade(action) {
+  if (!currentTicker) { alert('먼저 종목을 검색하세요.'); return; }
+  const qty = parseInt(document.getElementById('order-qty').value);
+  if (qty < 1) { alert('수량은 1 이상이어야 합니다.'); return; }
+
+  const label = action === 'buy' ? '매수' : '매도';
+  if (!confirm(`${currentName} (${currentTicker}) ${qty}주를 ${label}하시겠습니까?\n예상 금액: ${(qty * currentPrice).toLocaleString()}원`)) return;
+
+  const resp = await fetch('/api/v1/trade/manual', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action, ticker: currentTicker, qty})
+  });
+  const data = await resp.json();
+  const resultDiv = document.getElementById('trade-result');
+  resultDiv.style.display = 'block';
+  if (data.ok) {
+    resultDiv.className = 'flash success';
+    resultDiv.innerHTML = `<b>${label} 성공!</b> ${currentName} ${qty}주 @ ${(data.price || currentPrice).toLocaleString()}원 (총 ${(data.total || 0).toLocaleString()}원)`;
+    loadHoldings();
+    loadRecentTrades();
+  } else {
+    resultDiv.className = 'flash error';
+    resultDiv.innerHTML = `<b>${label} 실패:</b> ${data.error}`;
+  }
+}
+
+function fillSellOrder(ticker, name, qty) {
+  document.getElementById('stock-name').value = name;
+  currentTicker = ticker;
+  currentName = name;
+  document.getElementById('si-name').textContent = name;
+  document.getElementById('si-ticker').textContent = ticker;
+  document.getElementById('stock-info').style.display = 'block';
+  document.getElementById('order-form').style.display = 'block';
+  document.getElementById('order-qty').value = qty;
+  // 현재가 새로 조회
+  searchStock();
+}
+
+async function loadHoldings() {
+  const resp = await fetch('/api/v1/holdings');
+  const data = await resp.json();
+  const tbody = document.getElementById('holdings-list');
+  if (!data.ok || !data.holdings.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888;">보유 종목 없음</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.holdings.map(h => `
+    <tr>
+      <td><b>${h.name || '-'}</b></td>
+      <td>${h.ticker}</td>
+      <td>${h.qty}주</td>
+      <td>${(h.current_price || 0).toLocaleString()}원</td>
+      <td><span class="${(h.profit_rate||0) >= 0 ? 'ok' : 'bad'}">${(h.profit_rate||0).toFixed(1)}%</span></td>
+      <td><button class="btn btn-gray" style="padding:3px 8px;font-size:12px;" onclick="fillSellOrder('${h.ticker}','${h.name||''}',${h.qty})">매도</button></td>
+    </tr>
+  `).join('');
+}
+
+async function loadRecentTrades() {
+  const resp = await fetch('/api/v1/trades?limit=10');
+  const data = await resp.json();
+  const tbody = document.getElementById('recent-trades');
+  if (!data.ok || !data.trades.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888;">체결 내역 없음</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.trades.map(t => `
+    <tr>
+      <td style="font-size:12px;">${t.created_at}</td>
+      <td><span class="${t.action==='buy' ? 'ok' : 'bad'}">${t.action==='buy' ? '매수' : '매도'}</span></td>
+      <td>${t.stock_name || t.ticker}</td>
+      <td>${t.qty}주</td>
+      <td>${(t.price || 0).toLocaleString()}원</td>
+      <td>${t.status}</td>
+    </tr>
+  `).join('');
+}
+
+loadHoldings();
+loadRecentTrades();
+</script>
+{% endblock %}

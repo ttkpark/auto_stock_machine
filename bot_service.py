@@ -100,6 +100,12 @@ def run_buy_logic(
     recommendations = []
     for analyzer in analyzers:
         analyzer_name = analyzer.__class__.__name__
+        # 프롬프트 추적: build_buy_prompt로 실제 전송 프롬프트 복원
+        try:
+            from utils.prompt_manager import build_buy_prompt
+            sent_prompt = build_buy_prompt(balance=balance)
+        except Exception:
+            sent_prompt = ""
         rec = analyzer.recommend_buy(balance=balance)
         if rec:
             logger.info(f"[{rec.ai_model}] 추천: {rec.stock_name} - {rec.reason}")
@@ -110,12 +116,14 @@ def run_buy_logic(
                 ai_model=rec.ai_model,
                 stock_name=rec.stock_name,
                 reason=rec.reason,
+                prompt=sent_prompt,
             )
         else:
             trace.record(
                 "buy_recommendation_empty",
                 analyzer=analyzer_name,
                 reason=getattr(analyzer, "last_recommendation_error", "") or "추천 없음",
+                prompt=sent_prompt,
             )
 
     decision_maker = DecisionMaker(min_consensus=cfg.MIN_AI_CONSENSUS)
@@ -223,6 +231,24 @@ def run_buy_logic(
         else:
             notifier.send(f"[매수 실패] {agreed_stock_name} ({ticker}) {qty}주 주문 실패")
 
+        # trade_log 기록
+        try:
+            import db as _db
+            _db.insert_trade_log(
+                user_id=trace.user_id,
+                action="buy",
+                ticker=ticker,
+                stock_name=agreed_stock_name,
+                qty=qty,
+                price=current_price,
+                reason=" / ".join(reasons),
+                ai_decisions={"ai_models": ai_list, "reasons": reasons},
+                status="success" if success else "failed",
+                run_id=trace.run_id,
+            )
+        except Exception:
+            pass
+
         remaining_stocks -= 1
         trace.record(
             "buy_order_result",
@@ -290,6 +316,21 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
                 )
                 notifier.send(f"[급락 방어 매도] {holding['name']} | 수익률 {holding['profit_rate']:.1f}%")
                 tracker.record_sell(holding["ticker"])
+            # trade_log 기록
+            try:
+                import db as _db
+                _db.insert_trade_log(
+                    user_id=trace.user_id, action="sell",
+                    ticker=holding["ticker"], stock_name=holding["name"],
+                    qty=holding["qty"], price=holding["current_price"],
+                    profit_rate=holding["profit_rate"],
+                    profit_amount=(holding["current_price"] - holding["avg_price"]) * holding["qty"],
+                    reason=f"시장 급락 방어 매도: {crash_msg}",
+                    status="success" if success else "failed",
+                    run_id=trace.run_id,
+                )
+            except Exception:
+                pass
             trace.record(
                 "sell_market_crash",
                 stock_name=holding["name"],
@@ -371,6 +412,19 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
                         f"고가 {trailing_high:,} → 손절라인 {dynamic_stop:,.0f}원"
                     )
                     tracker.record_sell(ticker)
+                try:
+                    import db as _db
+                    _db.insert_trade_log(
+                        user_id=trace.user_id, action="sell",
+                        ticker=ticker, stock_name=name, qty=qty, price=current_price,
+                        profit_rate=profit_rate,
+                        profit_amount=(current_price - avg_price) * qty,
+                        reason=f"ATR 트레일링 스탑 (고가 {trailing_high:,} - ATR {atr:,.0f}x{atr_multiplier})",
+                        status="success" if success else "failed",
+                        run_id=trace.run_id,
+                    )
+                except Exception:
+                    pass
                 trace.record(
                     "sell_trailing_stop",
                     stock_name=name, ticker=ticker, qty=qty,
@@ -388,6 +442,19 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
                 notifier.notify_sell_order(name, ticker, qty, avg_price, current_price)
                 notifier.send(f"[손절 매도] {name} | 손실률 {profit_rate:.1f}%")
                 tracker.record_sell(ticker)
+            try:
+                import db as _db
+                _db.insert_trade_log(
+                    user_id=trace.user_id, action="sell",
+                    ticker=ticker, stock_name=name, qty=qty, price=current_price,
+                    profit_rate=profit_rate,
+                    profit_amount=(current_price - avg_price) * qty,
+                    reason=f"고정 손절 (기준: {cfg.STOP_LOSS_RATE}%)",
+                    status="success" if success else "failed",
+                    run_id=trace.run_id,
+                )
+            except Exception:
+                pass
             trace.record(
                 "sell_stop_loss",
                 stock_name=name, ticker=ticker, qty=qty,
@@ -396,6 +463,16 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
             continue
 
         # ── 2c: AI 투표 (모든 나머지 경우 — 사각지대 제거) ──
+        # 프롬프트 추적
+        try:
+            from utils.prompt_manager import build_sell_prompt
+            sent_sell_prompt = build_sell_prompt(
+                stock_name=name, ticker=ticker, qty=qty,
+                avg_price=avg_price, current_price=current_price,
+                profit_rate=profit_rate, market_info=enriched_context,
+            )
+        except Exception:
+            sent_sell_prompt = ""
         decisions = []
         for analyzer in analyzers:
             decision = analyzer.decide_sell(
@@ -416,6 +493,7 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
                 action=decision.action,
                 reason=decision.reason,
                 profit_rate=profit_rate,
+                prompt=sent_sell_prompt,
             )
 
         final_decision = decision_maker.decide_sell_by_vote(decisions)
@@ -454,6 +532,29 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
                     f"사유: {final_decision.reason}"
                 )
                 tracker.record_sell(ticker)
+            # trade_log 기록 (AI 판단 내역 포함)
+            try:
+                import db as _db
+                ai_detail = {
+                    "decisions": [
+                        {"ai_model": d.ai_model, "action": d.action, "reason": d.reason}
+                        for d in valid_decisions
+                    ],
+                    "errors": [d.ai_model for d in error_decisions],
+                    "final": final_decision.action,
+                }
+                _db.insert_trade_log(
+                    user_id=trace.user_id, action="sell",
+                    ticker=ticker, stock_name=name, qty=qty, price=current_price,
+                    profit_rate=profit_rate,
+                    profit_amount=(current_price - avg_price) * qty,
+                    reason=final_decision.reason,
+                    ai_decisions=ai_detail,
+                    status="success" if success else "failed",
+                    run_id=trace.run_id,
+                )
+            except Exception:
+                pass
             trace.record(
                 "sell_order_result",
                 stock_name=name, ticker=ticker, qty=qty,

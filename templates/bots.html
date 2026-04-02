@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>봇 관리</h2>
+  <p class="sub">매수/매도/모니터링/수동매매 봇을 통합 관리합니다. 동일한 인스턴스 구조로, 속성만 다르게 설정할 수 있습니다.</p>
+
+  <div style="margin: 12px 0;">
+    <button class="btn btn-primary" onclick="showCreateModal()">+ 새 봇 추가</button>
+  </div>
+
+  <table id="bot-table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>이름</th>
+        <th>타입</th>
+        <th>상태</th>
+        <th>생성일</th>
+        <th>설정</th>
+        <th>액션</th>
+      </tr>
+    </thead>
+    <tbody id="bot-list">
+      <tr><td colspan="7" style="text-align:center;color:#888;">로딩 중...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- 봇 생성 모달 -->
+<div id="create-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.4); z-index:999; align-items:center; justify-content:center;">
+  <div class="card" style="max-width:480px; margin:auto; margin-top:10vh;">
+    <h2>새 봇 만들기</h2>
+    <div style="margin-bottom:10px;">
+      <label><b>봇 이름</b></label><br>
+      <input type="text" id="new-bot-name" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" placeholder="예: 공격형 매수봇">
+    </div>
+    <div style="margin-bottom:10px;">
+      <label><b>봇 타입</b></label><br>
+      <select id="new-bot-type" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" onchange="updateConfigFields()">
+        <option value="buy_auto">자동 매수</option>
+        <option value="sell_auto">자동 매도</option>
+        <option value="monitor">모니터링</option>
+        <option value="manual">수동 매매</option>
+      </select>
+    </div>
+    <div id="config-fields" style="margin-bottom:10px;"></div>
+    <div style="display:flex; gap:8px;">
+      <button class="btn btn-primary" onclick="createBot()">생성</button>
+      <button class="btn btn-gray" onclick="hideCreateModal()">취소</button>
+    </div>
+  </div>
+</div>
+
+<!-- 봇 설정 편집 모달 -->
+<div id="edit-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.4); z-index:999;">
+  <div class="card" style="max-width:520px; margin:auto; margin-top:10vh;">
+    <h2>봇 설정 편집 — <span id="edit-bot-name"></span></h2>
+    <div id="edit-config-fields" style="margin-bottom:10px;"></div>
+    <div style="display:flex; gap:8px;">
+      <button class="btn btn-primary" onclick="saveBot()">저장</button>
+      <button class="btn btn-gray" onclick="hideEditModal()">취소</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  #create-modal, #edit-modal { display: none; }
+  #create-modal[data-show="1"], #edit-modal[data-show="1"] { display: flex; }
+  .config-row { margin-bottom: 8px; }
+  .config-row label { display:inline-block; width:140px; font-size:13px; }
+  .config-row input { padding:6px; border:1px solid #ccc; border-radius:4px; width:120px; }
+</style>
+
+<script>
+const TYPE_LABELS = {buy_auto:"자동 매수", sell_auto:"자동 매도", monitor:"모니터링", manual:"수동 매매"};
+const CONFIG_SCHEMA = {
+  buy_auto: [
+    {key:"budget_ratio", label:"예산 비율", type:"number", step:0.1, default:0.9},
+    {key:"min_consensus", label:"최소 합의", type:"number", step:1, default:1},
+    {key:"max_stocks", label:"최대 종목 수", type:"number", step:1, default:3},
+  ],
+  sell_auto: [
+    {key:"stop_loss_rate", label:"손절률 (%)", type:"number", step:0.5, default:-3.0},
+    {key:"take_profit_rate", label:"익절률 (%)", type:"number", step:0.5, default:5.0},
+    {key:"atr_multiplier", label:"ATR 배수", type:"number", step:0.5, default:2.0},
+    {key:"crash_threshold", label:"급락 기준 (%)", type:"number", step:0.5, default:-3.5},
+  ],
+  monitor: [
+    {key:"check_interval_sec", label:"점검 주기 (초)", type:"number", step:60, default:300},
+    {key:"profit_alert", label:"수익 알림 (%)", type:"number", step:0.5, default:5.0},
+    {key:"loss_alert", label:"손실 알림 (%)", type:"number", step:0.5, default:-3.0},
+    {key:"volatility_alert", label:"변동성 알림 (%)", type:"number", step:0.5, default:3.0},
+  ],
+  manual: [],
+};
+let editBotId = null;
+
+function renderConfigFields(container, botType, values) {
+  const fields = CONFIG_SCHEMA[botType] || [];
+  container.innerHTML = fields.map(f => `
+    <div class="config-row">
+      <label>${f.label}</label>
+      <input type="${f.type}" step="${f.step}" name="${f.key}" value="${values[f.key] !== undefined ? values[f.key] : f.default}">
+    </div>
+  `).join('') || '<p class="sub">추가 설정 없음</p>';
+}
+
+function getConfigFromContainer(container) {
+  const cfg = {};
+  container.querySelectorAll('input[name]').forEach(inp => {
+    cfg[inp.name] = inp.type === 'number' ? parseFloat(inp.value) : inp.value;
+  });
+  return cfg;
+}
+
+function updateConfigFields() {
+  const t = document.getElementById('new-bot-type').value;
+  renderConfigFields(document.getElementById('config-fields'), t, {});
+}
+
+function showCreateModal() {
+  document.getElementById('create-modal').dataset.show = "1";
+  updateConfigFields();
+}
+function hideCreateModal() { document.getElementById('create-modal').dataset.show = ""; }
+function showEditModal(bot) {
+  editBotId = bot.id;
+  document.getElementById('edit-bot-name').textContent = bot.name;
+  renderConfigFields(document.getElementById('edit-config-fields'), bot.bot_type, bot.config || {});
+  document.getElementById('edit-modal').dataset.show = "1";
+}
+function hideEditModal() { document.getElementById('edit-modal').dataset.show = ""; editBotId = null; }
+
+async function loadBots() {
+  const resp = await fetch('/api/v1/bots');
+  const data = await resp.json();
+  const tbody = document.getElementById('bot-list');
+  if (!data.ok || !data.bots.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#888;">봇이 없습니다.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.bots.map(b => `
+    <tr>
+      <td>${b.id}</td>
+      <td><b>${b.name}</b></td>
+      <td>${TYPE_LABELS[b.bot_type] || b.bot_type}</td>
+      <td><span class="${b.enabled ? 'ok' : 'bad'}">${b.enabled ? '활성' : '비활성'}</span></td>
+      <td>${b.created_at}</td>
+      <td><code style="font-size:12px;">${JSON.stringify(b.config).substring(0,60)}</code></td>
+      <td>
+        <button class="btn btn-primary" style="padding:4px 8px;font-size:12px;" onclick='showEditModal(${JSON.stringify(b)})'>편집</button>
+        <button class="btn btn-gray" style="padding:4px 8px;font-size:12px;" onclick="toggleBot(${b.id})">${b.enabled ? '비활성' : '활성'}</button>
+        <button class="btn btn-danger" style="padding:4px 8px;font-size:12px;" onclick="deleteBot(${b.id})">삭제</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function createBot() {
+  const name = document.getElementById('new-bot-name').value.trim();
+  const bot_type = document.getElementById('new-bot-type').value;
+  if (!name) { alert('봇 이름을 입력하세요.'); return; }
+  const config = getConfigFromContainer(document.getElementById('config-fields'));
+  const resp = await fetch('/api/v1/bots', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, bot_type, config})
+  });
+  const data = await resp.json();
+  if (data.ok) { hideCreateModal(); loadBots(); } else { alert(data.error); }
+}
+
+async function saveBot() {
+  if (!editBotId) return;
+  const config = getConfigFromContainer(document.getElementById('edit-config-fields'));
+  const resp = await fetch(`/api/v1/bots/${editBotId}`, {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({config})
+  });
+  const data = await resp.json();
+  if (data.ok) { hideEditModal(); loadBots(); } else { alert(data.error); }
+}
+
+async function toggleBot(id) {
+  await fetch(`/api/v1/bots/${id}/toggle`, {method:'POST'});
+  loadBots();
+}
+
+async function deleteBot(id) {
+  if (!confirm('이 봇을 삭제하시겠습니까?')) return;
+  await fetch(`/api/v1/bots/${id}`, {method:'DELETE'});
+  loadBots();
+}
+
+loadBots();
+</script>
+{% endblock %}

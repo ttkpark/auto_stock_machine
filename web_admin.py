@@ -913,7 +913,19 @@ def create_app() -> Flask:
         import logging
         logging.getLogger(__name__).warning(f"DB 초기화 실패, 레거시 모드로 동작: {e}")
 
+    # REST API 블루프린트 등록
+    from api import api_bp
+    app.register_blueprint(api_bp)
+
     _ensure_scheduler_started()
+
+    # 모니터링 데몬 시작
+    try:
+        from monitor import ensure_monitor_started
+        ensure_monitor_started()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"모니터 데몬 시작 실패: {e}")
 
     @app.get("/login")
     def login_page():
@@ -1234,6 +1246,34 @@ def create_app() -> Flask:
         except Exception as e:
             flash(f"초기화 실패: {e}", "error")
         return redirect(url_for("prompts_page"))
+
+    # ── 봇 관리 ──────────────────────────
+
+    @app.get("/bots")
+    @_login_required
+    def bots_page():
+        return render_template("bots.html", active_page="bots")
+
+    # ── 모니터링 ──────────────────────────
+
+    @app.get("/monitor")
+    @_login_required
+    def monitor_page():
+        return render_template("monitor.html", active_page="monitor")
+
+    # ── 수동 매매 ──────────────────────────
+
+    @app.get("/manual-trade")
+    @_login_required
+    def manual_trade_page():
+        return render_template("manual_trade.html", active_page="manual_trade")
+
+    # ── 체결 내역 ──────────────────────────
+
+    @app.get("/trade-log")
+    @_login_required
+    def trade_log_page():
+        return render_template("trade_log.html", active_page="trade_log")
 
     # ── 관리자: 사용자 관리 ──────────────────────────
 
