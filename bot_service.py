@@ -218,6 +218,7 @@ def run_buy_logic(
 
         success = broker.buy_order(ticker=ticker, qty=qty)
         spent = qty * current_price
+        broker_error = getattr(broker, "last_order_error", "")
         if success:
             bought_count += 1
             remaining_budget -= spent
@@ -229,7 +230,16 @@ def run_buy_logic(
             )
             notifier.send(detail_msg)
         else:
-            notifier.send(f"[매수 실패] {agreed_stock_name} ({ticker}) {qty}주 주문 실패")
+            err_lower = broker_error.lower()
+            # 잔고 부족 계열 에러이면 루프 전체 종료 (반복 매수 시도 방지)
+            is_balance_error = any(kw in broker_error for kw in [
+                "잔고", "부족", "초과", "주문가능", "매수가능", "잔액",
+                "BSID0013", "잔고부족",  # KIS 에러 코드
+            ]) or any(kw in err_lower for kw in ["insuffic", "balance", "fund"])
+            notifier.send(
+                f"[매수 실패] {agreed_stock_name} ({ticker}) {qty}주 주문 실패"
+                + (f"\n사유: {broker_error}" if broker_error else "")
+            )
 
         # trade_log 기록
         try:
@@ -259,8 +269,20 @@ def run_buy_logic(
             current_price=current_price,
             ai_models=ai_list,
             reasons=reasons,
-            broker_error=getattr(broker, "last_order_error", ""),
+            broker_error=broker_error,
         )
+
+        # 잔고 부족 에러이면 더 이상 다른 종목도 살 수 없으므로 루프 중단
+        if not success and is_balance_error:
+            msg = (
+                f"[매수 중단] 실제 사용 가능한 잔고가 없습니다. "
+                f"API 잔고({balance:,}원)는 D+2 미결제 자금을 포함한 값일 수 있습니다. "
+                f"나머지 {remaining_stocks}개 종목 매수를 건너뜁니다."
+            )
+            logger.warning(msg)
+            notifier.send(msg)
+            trace.record("buy_aborted_no_balance", reason=msg, remaining=remaining_stocks)
+            break
 
     trace.record(
         "buy_summary",
