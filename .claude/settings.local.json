@@ -10,7 +10,22 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\(''web_admin.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''web_admin.py OK''\\)\")",
       "Bash(ssh -p 39332 -i \"$USERPROFILE/.ssh/id_ed25519_face\" server@211.221.184.17 \"ls ~ && find ~ -maxdepth 3 -name ''.git'' -type d 2>/dev/null\")",
       "Bash(ls -la /c/Users/GH/Desktop/auto_stock_machine/*.py)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(ssh -p 39332 -i \"$USERPROFILE/.ssh/id_ed25519_face\" server@211.221.184.17 \"cd ~/auto_stock_machine && git pull origin master\")",
+      "Bash(ssh -p 39332 -i \"$USERPROFILE/.ssh/id_ed25519_face\" server@211.221.184.17 \"grep CLAUDE_MODEL_NAME ~/auto_stock_machine/.env\")",
+      "Bash(ssh -p 39332 -i \"$USERPROFILE/.ssh/id_ed25519_face\" server@211.221.184.17 \"cd ~/auto_stock_machine && git stash && git pull origin master\")",
+      "Bash(ssh -p 39332 -i \"$USERPROFILE/.ssh/id_ed25519_face\" server@211.221.184.17 \"cd ~/auto_stock_machine && git checkout --theirs .env.example && git add .env.example && git restore --staged data/\")",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(ssh -p 39332 -i \"$USERPROFILE/.ssh/id_ed25519_face\" server@211.221.184.17 \"cd ~/auto_stock_machine && git pull origin master 2>&1\")",
+      "Bash(ssh -p 39332 -i \"$USERPROFILE/.ssh/id_ed25519_face\" server@211.221.184.17 \"cd ~/auto_stock_machine && .venv/bin/python -c \"\":*)",
+      "Bash(grep -rn \"get_actions\\\\|append_action\" /c/Users/GH/Desktop/auto_stock_machine --include=\"*.py\" ! -path \"*/.venv/*\")",
+      "Bash(ssh -p 39332 -i \"/c/Users/GH/.ssh/id_ed25519_face\" server@211.221.184.17 \"kill 39705; sleep 1; cd /home/server/auto_stock_machine && nohup .venv/bin/python web_admin.py > /dev/null 2>&1 & echo Server restarted PID: $!\")",
+      "Bash(echo \"exit: $?\")",
+      "Bash(python -c ':*)",
+      "Bash(tasklist)",
+      "Bash(timeout 8 python web_admin.py)",
+      "Bash(wc -l /c/Users/GH/Desktop/auto_stock_machine/*.py /c/Users/GH/Desktop/auto_stock_machine/*/*.py)"
     ]
   }
 }

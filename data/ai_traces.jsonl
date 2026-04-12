@@ -84,3 +84,5 @@
 {"time": "2026-03-21 16:18:20", "run_id": "737541aea14f", "mode": "status", "trading_mode": "모의투자", "event_type": "run_start", "payload": {}}
 {"time": "2026-03-21 16:18:28", "run_id": "737541aea14f", "mode": "status", "trading_mode": "모의투자", "event_type": "status_report", "payload": {"balance": 9950000, "holdings_count": 0}}
 {"time": "2026-03-21 16:18:28", "run_id": "737541aea14f", "mode": "status", "trading_mode": "모의투자", "event_type": "run_end", "payload": {"status": "success"}}
+{"time": "2026-03-26 10:47:17", "run_id": "61b49541f350", "mode": "status", "trading_mode": "모의투자", "event_type": "run_start", "payload": {}}
+{"time": "2026-03-26 10:47:24", "run_id": "61b49541f350", "mode": "status", "trading_mode": "모의투자", "event_type": "run_end", "payload": {"status": "failed", "error": "403 Client Error: Forbidden for url: https://openapivts.koreainvestment.com:29443/oauth2/tokenP"}}

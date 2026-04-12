@@ -927,6 +927,11 @@ def create_app() -> Flask:
         import logging
         logging.getLogger(__name__).warning(f"모니터 데몬 시작 실패: {e}")
 
+    @app.get("/m")
+    def mobile_app():
+        """모바일 PWA 앱 서빙."""
+        return app.send_static_file("mobile/index.html")
+
     @app.get("/login")
     def login_page():
         return render_template("login.html")

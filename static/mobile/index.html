@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0f1118">
+<title>Auto Stock Machine</title>
+<link rel="manifest" href="/static/mobile/manifest.json">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
+<link rel="stylesheet" href="/static/mobile/app.css">
+</head>
+<body>
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<!-- Loading overlay -->
+<div id="loading" class="loading-overlay" style="display:none">
+  <div class="spinner"></div>
+</div>
+
+<!-- Login Screen -->
+<div id="screen-login" class="screen active">
+  <div class="login-container">
+    <div class="login-logo">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+        <rect width="64" height="64" rx="16" fill="#3b82f6"/>
+        <path d="M16 44L26 28L36 36L48 20" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="48" cy="20" r="4" fill="#22c55e"/>
+      </svg>
+    </div>
+    <h1 class="login-title">Auto Stock Machine</h1>
+    <p class="login-subtitle">AI 자동매매 시스템</p>
+    <form id="login-form" class="login-form">
+      <div class="input-group">
+        <input type="text" id="login-username" placeholder="사용자명" autocomplete="username" required>
+      </div>
+      <div class="input-group">
+        <input type="password" id="login-password" placeholder="비밀번호" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">로그인</button>
+    </form>
+  </div>
+</div>
+
+<!-- App Shell -->
+<div id="app-shell" style="display:none">
+  <!-- Header -->
+  <header id="app-header">
+    <h2 id="header-title">대시보드</h2>
+    <button id="header-refresh" class="header-btn" onclick="App.refreshCurrentScreen()">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15"/></svg>
+    </button>
+  </header>
+
+  <!-- Screens -->
+  <main id="screen-container">
+    <div id="screen-dashboard" class="screen"></div>
+    <div id="screen-holdings" class="screen"></div>
+    <div id="screen-trade" class="screen"></div>
+    <div id="screen-bots" class="screen"></div>
+    <div id="screen-tradelog" class="screen"></div>
+    <div id="screen-ai" class="screen"></div>
+    <div id="screen-monitor" class="screen"></div>
+    <div id="screen-settings" class="screen"></div>
+    <div id="screen-schedule" class="screen"></div>
+    <div id="screen-more" class="screen"></div>
+  </main>
+
+  <!-- Bottom Tab Bar -->
+  <nav id="tab-bar">
+    <button class="tab active" data-screen="dashboard">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      <span>대시보드</span>
+    </button>
+    <button class="tab" data-screen="holdings">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12V7H5a2 2 0 010-4h14v4"/><path d="M3 5v14a2 2 0 002 2h16v-5"/><path d="M18 12a2 2 0 000 4h4v-4h-4z"/></svg>
+      <span>보유종목</span>
+    </button>
+    <button class="tab" data-screen="trade">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+      <span>매매</span>
+    </button>
+    <button class="tab" data-screen="bots">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="3"/><path d="M8 16h0M16 16h0"/><path d="M9 20h6"/></svg>
+      <span>봇</span>
+    </button>
+    <button class="tab" data-screen="more">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+      <span>더보기</span>
+    </button>
+  </nav>
+</div>
+
+<script src="/static/mobile/app.js"></script>
+</body>
+</html>
