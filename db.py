@@ -32,6 +32,7 @@ MANAGED_USER_KEYS = [
     "BUY_BUDGET_RATIO", "MIN_AI_CONSENSUS", "MAX_BUY_STOCKS",
     "TAKE_PROFIT_RATE", "STOP_LOSS_RATE",
     "TRAILING_STOP_ATR_MULTIPLIER", "MARKET_CRASH_THRESHOLD", "STAGNANT_HOLDING_DAYS",
+    "SELL_COOLDOWN_MINUTES",
 ]
 
 _SCHEMA_SQL = """
@@ -173,6 +174,17 @@ CREATE TABLE IF NOT EXISTS monitor_config (
     created_at           TEXT NOT NULL,
     updated_at           TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS sell_cooldown (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    ticker         TEXT NOT NULL,
+    decided_action TEXT NOT NULL DEFAULT 'hold',
+    cooldown_until TEXT NOT NULL,
+    created_at     TEXT NOT NULL,
+    UNIQUE(user_id, ticker)
+);
+CREATE INDEX IF NOT EXISTS idx_sell_cooldown_user ON sell_cooldown(user_id, cooldown_until);
 """
 
 
@@ -923,3 +935,67 @@ def get_all_active_monitors() -> list[dict]:
             "WHERE m.enabled = 1 AND u.is_active = 1"
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+# ------------------------------------------------------------------
+# 매도 쿨다운
+# ------------------------------------------------------------------
+
+def set_sell_cooldown(user_id: int, ticker: str, cooldown_minutes: int,
+                      decided_action: str = "hold") -> None:
+    """매도/보유 판단 후 해당 종목에 쿨다운을 설정합니다."""
+    import config as cfg_module
+    now = cfg_module.now()
+    cooldown_until = (now + __import__("datetime").timedelta(minutes=cooldown_minutes)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO sell_cooldown (user_id, ticker, decided_action, cooldown_until, created_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(user_id, ticker) DO UPDATE SET "
+            "decided_action=excluded.decided_action, cooldown_until=excluded.cooldown_until, "
+            "created_at=excluded.created_at",
+            (user_id, ticker, decided_action, cooldown_until, now.strftime("%Y-%m-%d %H:%M:%S")),
+        )
+
+
+def is_in_sell_cooldown(user_id: int, ticker: str) -> bool:
+    """해당 종목이 쿨다운 중인지 확인합니다."""
+    import config as cfg_module
+    now_str = cfg_module.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT cooldown_until FROM sell_cooldown WHERE user_id=? AND ticker=? AND cooldown_until > ?",
+            (user_id, ticker, now_str),
+        ).fetchone()
+        return row is not None
+
+
+def get_sell_cooldown_info(user_id: int, ticker: str) -> dict | None:
+    """쿨다운 상세 정보를 반환합니다."""
+    import config as cfg_module
+    now_str = cfg_module.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM sell_cooldown WHERE user_id=? AND ticker=? AND cooldown_until > ?",
+            (user_id, ticker, now_str),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def clear_sell_cooldown(user_id: int, ticker: str) -> None:
+    """특정 종목의 쿨다운을 해제합니다 (매도 실행 시)."""
+    with get_db() as conn:
+        conn.execute(
+            "DELETE FROM sell_cooldown WHERE user_id=? AND ticker=?",
+            (user_id, ticker),
+        )
+
+
+def clear_expired_cooldowns() -> None:
+    """만료된 쿨다운 레코드를 정리합니다."""
+    import config as cfg_module
+    now_str = cfg_module.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_db() as conn:
+        conn.execute("DELETE FROM sell_cooldown WHERE cooldown_until <= ?", (now_str,))

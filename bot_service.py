@@ -374,6 +374,15 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
     # ── 2단계: 종목별 분석 ──
     atr_multiplier = getattr(cfg, "TRAILING_STOP_ATR_MULTIPLIER", 2.0)
 
+    # 쿨다운 설정 로드 (사용자 설정 → 기본값 180분 = 3시간)
+    try:
+        import db as _db
+        _sell_cooldown_min = int(
+            _db.get_user_config(trace.user_id).get("SELL_COOLDOWN_MINUTES", "") or 180
+        )
+    except Exception:
+        _sell_cooldown_min = 180
+
     for holding in holdings:
         name = holding["name"]
         ticker = holding["ticker"]
@@ -381,6 +390,25 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
         avg_price = holding["avg_price"]
         current_price = holding["current_price"]
         profit_rate = holding["profit_rate"]
+
+        # 쿨다운 체크: 이전에 "보유" 결정된 종목은 쿨다운 시간 동안 AI 판단 스킵
+        try:
+            import db as _db
+            cooldown_info = _db.get_sell_cooldown_info(trace.user_id, ticker)
+            if cooldown_info:
+                logger.info(
+                    f"[쿨다운] {name} ({ticker}) → "
+                    f"{cooldown_info['cooldown_until']}까지 AI 판단 스킵"
+                )
+                trace.record(
+                    "sell_cooldown_skip",
+                    stock_name=name, ticker=ticker,
+                    cooldown_until=cooldown_info["cooldown_until"],
+                    profit_rate=profit_rate,
+                )
+                continue
+        except Exception:
+            pass
 
         logger.info(
             f"보유 종목 검토: {name} ({ticker}) "
@@ -543,6 +571,13 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
         )
 
         if final_decision.action == "매도":
+            # 매도 실행 시 쿨다운 해제
+            try:
+                import db as _db
+                _db.clear_sell_cooldown(trace.user_id, ticker)
+            except Exception:
+                pass
+
             success = broker.sell_order(ticker=ticker, qty=qty)
             if success:
                 notifier.notify_sell_order(name, ticker, qty, avg_price, current_price)
@@ -583,11 +618,23 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
                 success=success, reason=final_decision.reason,
             )
         else:
-            # 보유 결정도 텔레그램 알림 전송
+            # 보유 결정 → 쿨다운 설정 (다음 _sell_cooldown_min 동안 재판단 방지)
+            try:
+                import db as _db
+                _db.set_sell_cooldown(
+                    trace.user_id, ticker, _sell_cooldown_min, decided_action="hold",
+                )
+                logger.info(
+                    f"[쿨다운 설정] {name} ({ticker}) → {_sell_cooldown_min}분간 AI 재판단 방지"
+                )
+            except Exception:
+                pass
+
             days_text = f" | {holding_days}일 보유" if holding_days else ""
             notifier.send(
                 f"[AI 판단: 보유] {name} ({ticker})\n"
                 f"수익률 {profit_rate:+.1f}%{days_text}\n"
+                f"(다음 판단: {_sell_cooldown_min}분 후)\n"
                 f"{vote_summary}"
             )
             trace.record(
@@ -595,6 +642,7 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
                 stock_name=name, ticker=ticker,
                 profit_rate=profit_rate,
                 reason=final_decision.reason,
+                cooldown_minutes=_sell_cooldown_min,
             )
 
     logger.info("[매도 로직] 완료")

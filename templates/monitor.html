@@ -29,6 +29,11 @@
       <div style="margin:10px 0;">
         <label><input type="checkbox" id="mon-auto-sell"> <b>자동 AI 매도 판단</b> (기준 초과 시 자동으로 매도 로직 실행)</label>
       </div>
+      <div style="margin:8px 0;">
+        <label style="display:inline-block;width:160px;">보유 판단 쿨다운 (분)</label>
+        <input type="number" id="mon-cooldown" value="180" min="0" step="30" style="width:100px;padding:6px;border:1px solid #ccc;border-radius:4px;">
+        <span class="sub"> AI가 보유 결정 후 재판단까지 대기 (0=끄기)</span>
+      </div>
       <div style="margin:10px 0;">
         <label><input type="checkbox" id="mon-notify" checked> <b>텔레그램 알림 전송</b></label>
       </div>
@@ -62,6 +67,7 @@ async function loadMonitor() {
   document.getElementById('mon-loss').value = cfg.loss_threshold;
   document.getElementById('mon-volatility').value = cfg.volatility_threshold;
   document.getElementById('mon-auto-sell').checked = cfg.auto_sell_enabled;
+  document.getElementById('mon-cooldown').value = data.sell_cooldown_minutes ?? 180;
   document.getElementById('mon-notify').checked = cfg.notify_on_threshold !== false;
 
   const state = data.state;
@@ -96,6 +102,7 @@ document.getElementById('monitor-form').addEventListener('submit', async (e) => 
     loss_threshold: parseFloat(document.getElementById('mon-loss').value),
     volatility_threshold: parseFloat(document.getElementById('mon-volatility').value),
     auto_sell_enabled: document.getElementById('mon-auto-sell').checked,
+    sell_cooldown_minutes: parseInt(document.getElementById('mon-cooldown').value) || 0,
     notify_on_threshold: document.getElementById('mon-notify').checked,
   };
   const resp = await fetch('/api/v1/monitor', {

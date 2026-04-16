@@ -321,6 +321,10 @@ def api_monitor_status():
     config = _db.get_monitor_config(g.user_id)
     state = get_monitor_state()
     user_alerts = [a for a in state.get("alerts", []) if a.get("user_id") == g.user_id]
+    # 쿨다운 설정 (user_config에서 로드)
+    user_cfg = _db.get_user_config(g.user_id)
+    cooldown_min = int(user_cfg.get("SELL_COOLDOWN_MINUTES", "") or 180)
+
     return jsonify({
         "ok": True,
         "config": config or {
@@ -329,6 +333,7 @@ def api_monitor_status():
             "volatility_threshold": 3.0, "auto_sell_enabled": False,
             "notify_on_threshold": True,
         },
+        "sell_cooldown_minutes": cooldown_min,
         "state": {
             "running": state.get("running", False),
             "last_check": state.get("last_check", ""),
@@ -355,6 +360,10 @@ def api_save_monitor():
             auto_sell_enabled=bool(data.get("auto_sell_enabled", False)),
             notify_on_threshold=bool(data.get("notify_on_threshold", True)),
         )
+        # 쿨다운 설정도 user_config에 저장
+        cooldown_min = data.get("sell_cooldown_minutes")
+        if cooldown_min is not None:
+            _db.set_user_config(g.user_id, "SELL_COOLDOWN_MINUTES", str(int(cooldown_min)))
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400

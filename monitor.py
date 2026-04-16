@@ -56,6 +56,14 @@ def _check_user_holdings(user_id: int, monitor_cfg: dict) -> list[dict]:
             avg_price = h.get("avg_price", 0)
             qty = h.get("qty", 0)
 
+            # 쿨다운 중인 종목은 알림/AI 판단 스킵
+            try:
+                if db_module.is_in_sell_cooldown(user_id, ticker):
+                    logger.debug(f"[모니터] {name} ({ticker}) 쿨다운 중 — 스킵")
+                    continue
+            except Exception:
+                pass
+
             alert = None
 
             # 수익 기준 초과
@@ -137,6 +145,12 @@ def _monitor_loop() -> None:
                 MONITOR_STATE["running"] = True
                 MONITOR_STATE["active_users"] = len(monitors)
                 MONITOR_STATE["last_check"] = config_module.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # 만료된 쿨다운 레코드 정리 (루프마다)
+            try:
+                db_module.clear_expired_cooldowns()
+            except Exception:
+                pass
 
             for monitor_cfg in monitors:
                 user_id = monitor_cfg["user_id"]
