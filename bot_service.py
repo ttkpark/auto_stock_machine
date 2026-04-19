@@ -87,6 +87,7 @@ def run_buy_logic(
     logger.info("[매수 로직] 시작")
 
     balance = broker.get_balance()
+    balance_before_buy = balance  # 매수 거래 전 잔고 저장
     logger.info(f"주문 가능 예수금: {balance:,}원")
     trace.record("buy_balance", balance=balance, min_required=10000)
 
@@ -251,6 +252,7 @@ def run_buy_logic(
                 stock_name=agreed_stock_name,
                 qty=qty,
                 price=current_price,
+                balance_before=balance_before_buy,
                 reason=" / ".join(reasons),
                 ai_decisions={"ai_models": ai_list, "reasons": reasons},
                 status="success" if success else "failed",
@@ -299,6 +301,7 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
     logger.info("[매도 로직] 시작")
 
     holdings = broker.get_holdings()
+    balance_before_sell = broker.get_balance()  # 매도 거래 전 잔고 저장
     trace.record("sell_holdings_loaded", count=len(holdings))
     if not holdings:
         logger.info("보유 종목 없음. 매도 로직을 건너뜁니다.")
@@ -347,6 +350,7 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
                     qty=holding["qty"], price=holding["current_price"],
                     profit_rate=holding["profit_rate"],
                     profit_amount=(holding["current_price"] - holding["avg_price"]) * holding["qty"],
+                    balance_before=balance_before_sell,
                     reason=f"시장 급락 방어 매도: {crash_msg}",
                     status="success" if success else "failed",
                     run_id=trace.run_id,
@@ -469,6 +473,7 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
                         ticker=ticker, stock_name=name, qty=qty, price=current_price,
                         profit_rate=profit_rate,
                         profit_amount=(current_price - avg_price) * qty,
+                        balance_before=balance_before_sell,
                         reason=f"ATR 트레일링 스탑 (고가 {trailing_high:,} - ATR {atr:,.0f}x{atr_multiplier})",
                         status="success" if success else "failed",
                         run_id=trace.run_id,
@@ -499,6 +504,7 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
                     ticker=ticker, stock_name=name, qty=qty, price=current_price,
                     profit_rate=profit_rate,
                     profit_amount=(current_price - avg_price) * qty,
+                    balance_before=balance_before_sell,
                     reason=f"고정 손절 (기준: {cfg.STOP_LOSS_RATE}%)",
                     status="success" if success else "failed",
                     run_id=trace.run_id,
@@ -605,6 +611,7 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
                     ticker=ticker, stock_name=name, qty=qty, price=current_price,
                     profit_rate=profit_rate,
                     profit_amount=(current_price - avg_price) * qty,
+                    balance_before=balance_before_sell,
                     reason=final_decision.reason,
                     ai_decisions=ai_detail,
                     status="success" if success else "failed",

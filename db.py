@@ -152,6 +152,7 @@ CREATE TABLE IF NOT EXISTS trade_log (
     total_amount  INTEGER NOT NULL DEFAULT 0,
     profit_rate   REAL,
     profit_amount INTEGER,
+    balance_before INTEGER NOT NULL DEFAULT 0,
     reason        TEXT NOT NULL DEFAULT '',
     ai_decisions  TEXT NOT NULL DEFAULT '{}',
     status        TEXT NOT NULL DEFAULT 'success',
@@ -817,8 +818,8 @@ def delete_bot(bot_id: int) -> None:
 
 def insert_trade_log(user_id: int, action: str, ticker: str, stock_name: str = "",
                      qty: int = 0, price: int = 0, profit_rate: float | None = None,
-                     profit_amount: int | None = None, reason: str = "",
-                     ai_decisions: dict | None = None, status: str = "success",
+                     profit_amount: int | None = None, balance_before: int = 0,
+                     reason: str = "", ai_decisions: dict | None = None, status: str = "success",
                      run_id: str = "", bot_id: int | None = None) -> int:
     import config as cfg_module
     now_str = cfg_module.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -827,10 +828,10 @@ def insert_trade_log(user_id: int, action: str, ticker: str, stock_name: str = "
         conn.execute(
             "INSERT INTO trade_log "
             "(user_id, bot_id, action, ticker, stock_name, qty, price, total_amount, "
-            " profit_rate, profit_amount, reason, ai_decisions, status, run_id, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " profit_rate, profit_amount, balance_before, reason, ai_decisions, status, run_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (user_id, bot_id, action, ticker, stock_name, qty, price, total_amount,
-             profit_rate, profit_amount, reason,
+             profit_rate, profit_amount, balance_before, reason,
              json.dumps(ai_decisions or {}, ensure_ascii=False),
              status, run_id, now_str),
         )
