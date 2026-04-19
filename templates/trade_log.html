@@ -24,6 +24,7 @@
         <th>수량</th>
         <th>가격</th>
         <th>총액</th>
+        <th>거래 전 잔고</th>
         <th>수익률</th>
         <th>사유</th>
         <th>AI</th>
@@ -73,6 +74,7 @@ async function loadTrades() {
   tbody.innerHTML = trades.map(t => {
     const hasAi = t.ai_decisions && Object.keys(t.ai_decisions).length > 0;
     const profitStr = t.profit_rate != null ? `<span class="${t.profit_rate >= 0 ? 'ok':'bad'}">${t.profit_rate.toFixed(1)}%</span>` : '-';
+    const balanceStr = t.balance_before ? `${(t.balance_before||0).toLocaleString()}원` : '-';
     return `
     <tr>
       <td style="font-size:12px;">${t.created_at}</td>
@@ -82,9 +84,10 @@ async function loadTrades() {
       <td>${t.qty}주</td>
       <td>${(t.price||0).toLocaleString()}원</td>
       <td>${(t.total_amount||0).toLocaleString()}원</td>
+      <td style="font-size:12px;color:#0066cc;">${balanceStr}</td>
       <td>${profitStr}</td>
       <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;">${t.reason || '-'}</td>
-      <td>${hasAi ? `<button class="btn btn-primary" style="padding:3px 8px;font-size:11px;" onclick="showAiDetail(${t.id})">AI 상세</button>` : '-'}</td>
+      <td><button class="btn btn-primary" style="padding:3px 8px;font-size:11px;" onclick="showAiDetail(${t.id})">상세</button></td>
     </tr>`;
   }).join('');
 }
@@ -101,6 +104,7 @@ async function showAiDetail(tradeId) {
     <div style="margin-bottom:10px;">
       <b>${trade.action === 'buy' ? '매수' : '매도'}</b> | ${trade.stock_name || trade.ticker} | ${trade.qty}주 @ ${(trade.price||0).toLocaleString()}원
       <br><span class="sub">${trade.created_at} | run_id: ${trade.run_id || '-'}</span>
+      ${trade.balance_before ? `<br><span class="sub">거래 전 잔고: ${(trade.balance_before||0).toLocaleString()}원</span>` : ''}
     </div>
   `;
 
