@@ -24,6 +24,7 @@ DEFAULT_BUY_TEMPLATE = (
     "당신은 한국 주식 전문가입니다.\n"
     "내 주문 가능 예수금은 {balance}원입니다.\n"
     "{budget_instruction}\n"
+    "{budget_per_stock_info}"
     "{market_info_line}\n\n"
     "이 예수금 한도 내에서 지금 매수하면 좋을 한국 주식을 딱 1개만 추천해 주세요.\n"
     "반드시 한국거래소(KRX)에 실제 상장된 정확한 종목명을 사용해야 합니다.\n"
@@ -160,14 +161,19 @@ def build_budget_instruction(user_id: int = 0) -> str:
     )
 
 
-def build_buy_prompt(balance: int, market_info: str = "", user_id: int = 0) -> str:
+def build_buy_prompt(balance: int, market_info: str = "", budget_per_stock: int = 0, user_id: int = 0) -> str:
     template = load_prompts(user_id=user_id)["buy"]
     market_info_line = f"추가 시장 정보: {market_info}" if market_info else ""
+    # budget_per_stock이 지정되면 AI에게 할당 예산 정보 제공
+    budget_per_stock_info = ""
+    if budget_per_stock > 0:
+        budget_per_stock_info = f"각 종목당 할당 예산은 약 {budget_per_stock:,}원입니다.\n"
     return _apply_template(
         template,
         {
             "balance": f"{balance:,}",
             "budget_instruction": build_budget_instruction(user_id=user_id),
+            "budget_per_stock_info": budget_per_stock_info,
             "market_info_line": market_info_line,
         },
     )

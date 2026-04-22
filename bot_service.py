@@ -99,12 +99,17 @@ def run_buy_logic(
         return
 
     recommendations = []
+    # AI 추천 시 사용할 예상 budget_per_stock (최악의 경우: MAX_BUY_STOCKS 종목 분산)
+    max_buy_stocks = int(getattr(cfg, "MAX_BUY_STOCKS", 1))
+    estimated_total_budget = int(balance * cfg.BUY_BUDGET_RATIO)
+    estimated_budget_per_stock = estimated_total_budget // max(1, max_buy_stocks)
+
     for analyzer in analyzers:
         analyzer_name = analyzer.__class__.__name__
         # 프롬프트 추적: build_buy_prompt로 실제 전송 프롬프트 복원
         try:
             from utils.prompt_manager import build_buy_prompt
-            sent_prompt = build_buy_prompt(balance=balance)
+            sent_prompt = build_buy_prompt(balance=balance, budget_per_stock=estimated_budget_per_stock)
         except Exception:
             sent_prompt = ""
         rec = analyzer.recommend_buy(balance=balance)
@@ -128,7 +133,6 @@ def run_buy_logic(
             )
 
     decision_maker = DecisionMaker(min_consensus=cfg.MIN_AI_CONSENSUS)
-    max_buy_stocks = int(getattr(cfg, "MAX_BUY_STOCKS", 1))
     agreed_stock_names = decision_maker.find_buy_consensus_candidates(
         recommendations,
         max_stocks=max_buy_stocks,
@@ -160,6 +164,8 @@ def run_buy_logic(
 
     # 종목 검증 및 현재가 조회 (가격 오름차순 정렬용)
     buy_candidates = []
+    # 이미 AI 추천을 받았으므로 목적상 아래는 검증 단계입니다.
+    # 실제 추천 시 AI에게 budget_per_stock 정보를 전달했다는 점을 참고하세요 (build_buy_prompt 참조).
     for agreed_stock_name in agreed_stock_names:
         ticker = validator.verify_and_get_code(agreed_stock_name)
         if not ticker:
