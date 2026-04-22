@@ -150,11 +150,12 @@ def run_buy_logic(
     total_budget = int(balance * cfg.BUY_BUDGET_RATIO)
     remaining_budget = total_budget
     remaining_stocks = len(agreed_stock_names)
+    initial_budget_per_stock = total_budget // max(1, remaining_stocks)
     trace.record(
         "buy_budget_plan",
         total_budget=total_budget,
         stock_count=remaining_stocks,
-        budget_per_stock=total_budget // max(1, remaining_stocks),
+        budget_per_stock=initial_budget_per_stock,
     )
 
     # 종목 검증 및 현재가 조회 (가격 오름차순 정렬용)
@@ -175,6 +176,15 @@ def run_buy_logic(
             logger.error(msg)
             notifier.send(f"[매수 오류] {msg}")
             trace.record("buy_error", stock_name=agreed_stock_name, ticker=ticker, reason=msg)
+            remaining_stocks -= 1
+            continue
+
+        # 초기 예산으로 1주 구매 가능한지 미리 필터링 (AI 토큰 낭비 방지)
+        if current_price > initial_budget_per_stock:
+            msg = f"'{agreed_stock_name}' 가격({current_price:,}원)이 할당 예산({initial_budget_per_stock:,}원)을 초과. 매수 스킵."
+            logger.warning(msg)
+            notifier.send(f"[매수 스킵] {msg}")
+            trace.record("buy_price_exceeds_budget", stock_name=agreed_stock_name, price=current_price, budget=initial_budget_per_stock)
             remaining_stocks -= 1
             continue
 
