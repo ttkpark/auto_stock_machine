@@ -69,11 +69,25 @@
         <span class="var-chip">{balance}</span>
         <span class="var-chip">{budget_instruction}</span>
         <span class="var-chip">{market_info_line}</span>
+        — <code>{market_info_line}</code> 자리에 아래 '매수 규칙' + 시장 국면 + 후보 리스트가 자동 합성되어 들어갑니다.
       </div>
       <textarea class="prompt-editor" name="buy_template" id="buy_template"
         rows="10" data-prompt="buy">{{ buy_template }}</textarea>
       <div class="preview-label">미리보기 (예시값 적용)</div>
       <div class="preview-box" id="preview-buy"></div>
+    </div>
+
+    <!-- 매수 규칙 프롬프트 (사용자별 편집 가능) -->
+    <div class="editor-block">
+      <div class="section-label">매수 규칙 프롬프트 (사용자 전용)</div>
+      <div class="hint">
+        매수 추천 시 AI에게 전달되는 '내 전략 룰' 본문입니다.
+        매수 추천 프롬프트의 <code>{market_info_line}</code> 자리에 시장 국면·후보 리스트와 함께 자동 삽입됩니다.
+        플레이스홀더 없이 자유 서술로 작성하세요.
+      </div>
+      <textarea class="prompt-editor" name="buy_rules_template" id="buy_rules_template"
+        rows="12" data-prompt="buy_rules">{{ buy_rules_template }}</textarea>
+      <div class="preview-label">저장한 내용이 그대로 AI 프롬프트에 포함됩니다</div>
     </div>
 
     <!-- 매도/보유 판단 프롬프트 -->
@@ -104,7 +118,7 @@
 <div class="card">
   <h2>기본값으로 초기화</h2>
   <div class="sub" style="margin-bottom: 12px;">현재 편집 내용을 버리고 코드 내장 기본값으로 되돌립니다.</div>
-  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px;">
+  <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 14px;">
     <div>
       <div class="section-label" style="font-size: 13px; color: #5a6474; margin-bottom: 4px;">예산 기본값</div>
       <pre style="background:#f9fbff;border:1px solid #e4e9f5;border-radius:6px;padding:10px;font-size:12px;overflow-x:auto;white-space:pre-wrap;margin:0;">{{ default_budget }}</pre>
@@ -112,6 +126,10 @@
     <div>
       <div class="section-label" style="font-size: 13px; color: #5a6474; margin-bottom: 4px;">매수 기본값</div>
       <pre style="background:#f9fbff;border:1px solid #e4e9f5;border-radius:6px;padding:10px;font-size:12px;overflow-x:auto;white-space:pre-wrap;margin:0;">{{ default_buy }}</pre>
+    </div>
+    <div>
+      <div class="section-label" style="font-size: 13px; color: #5a6474; margin-bottom: 4px;">매수 규칙 기본값</div>
+      <pre style="background:#f9fbff;border:1px solid #e4e9f5;border-radius:6px;padding:10px;font-size:12px;overflow-x:auto;white-space:pre-wrap;margin:0;">{{ default_buy_rules }}</pre>
     </div>
     <div>
       <div class="section-label" style="font-size: 13px; color: #5a6474; margin-bottom: 4px;">매도 기본값</div>

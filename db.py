@@ -108,11 +108,12 @@ CREATE TABLE IF NOT EXISTS telegram_subscribers (
 );
 
 CREATE TABLE IF NOT EXISTS user_prompts (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id         INTEGER NOT NULL UNIQUE REFERENCES users(id),
-    buy_template    TEXT NOT NULL DEFAULT '',
-    sell_template   TEXT NOT NULL DEFAULT '',
-    budget_template TEXT NOT NULL DEFAULT ''
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id            INTEGER NOT NULL UNIQUE REFERENCES users(id),
+    buy_template       TEXT NOT NULL DEFAULT '',
+    sell_template      TEXT NOT NULL DEFAULT '',
+    budget_template    TEXT NOT NULL DEFAULT '',
+    buy_rules_template TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS token_cache (
@@ -223,12 +224,29 @@ def init_db() -> None:
     """스키마 생성 + 최초 실행 시 .env 데이터 자동 마이그레이션."""
     with get_db() as conn:
         conn.executescript(_SCHEMA_SQL)
+        _apply_column_migrations(conn)
 
     # 사용자가 0명이면 자동 마이그레이션
     with get_db() as conn:
         count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     if count == 0:
         _migrate_from_legacy()
+
+
+def _apply_column_migrations(conn) -> None:
+    """기존 DB에 추가된 컬럼을 안전하게 ALTER TABLE 로 보충합니다."""
+    migrations: list[tuple[str, str, str]] = [
+        # (table, column, ddl_for_add)
+        ("user_prompts", "buy_rules_template", "TEXT NOT NULL DEFAULT ''"),
+    ]
+    for table, column, ddl in migrations:
+        try:
+            cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+            if column not in cols:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+                logger.info(f"[DB Migration] {table}.{column} 컬럼 추가")
+        except Exception as e:
+            logger.warning(f"[DB Migration] {table}.{column} 추가 실패: {e}")
 
 
 def is_db_available() -> bool:
@@ -674,12 +692,19 @@ def get_user_prompts(user_id: int) -> dict | None:
         return dict(row) if row else None
 
 
-def save_user_prompts(user_id: int, buy_template: str, sell_template: str, budget_template: str = "") -> None:
+def save_user_prompts(
+    user_id: int,
+    buy_template: str,
+    sell_template: str,
+    budget_template: str = "",
+    buy_rules_template: str = "",
+) -> None:
     with get_db() as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO user_prompts (user_id, buy_template, sell_template, budget_template) "
-            "VALUES (?, ?, ?, ?)",
-            (user_id, buy_template, sell_template, budget_template),
+            "INSERT OR REPLACE INTO user_prompts "
+            "(user_id, buy_template, sell_template, budget_template, buy_rules_template) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (user_id, buy_template, sell_template, budget_template, buy_rules_template),
         )
 
 

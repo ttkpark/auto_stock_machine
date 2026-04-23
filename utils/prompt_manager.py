@@ -102,6 +102,7 @@ def load_prompts(user_id: int = 0) -> dict:
                     "sell": row.get("sell_template", "") or DEFAULT_SELL_TEMPLATE,
                     "ask": DEFAULT_ASK_TEMPLATE,
                     "budget": row.get("budget_template", "") or DEFAULT_BUDGET_TEMPLATE,
+                    "buy_rules": row.get("buy_rules_template", "") or DEFAULT_BUY_RULES_TEMPLATE,
                 }
         except Exception:
             pass
@@ -114,6 +115,7 @@ def load_prompts(user_id: int = 0) -> dict:
                 "sell": data.get("sell", DEFAULT_SELL_TEMPLATE),
                 "ask": data.get("ask", DEFAULT_ASK_TEMPLATE),
                 "budget": data.get("budget", DEFAULT_BUDGET_TEMPLATE),
+                "buy_rules": data.get("buy_rules", DEFAULT_BUY_RULES_TEMPLATE),
             }
         except Exception:
             pass
@@ -122,6 +124,7 @@ def load_prompts(user_id: int = 0) -> dict:
         "sell": DEFAULT_SELL_TEMPLATE,
         "ask": DEFAULT_ASK_TEMPLATE,
         "budget": DEFAULT_BUDGET_TEMPLATE,
+        "buy_rules": DEFAULT_BUY_RULES_TEMPLATE,
     }
 
 
@@ -163,7 +166,7 @@ def build_budget_instruction(user_id: int = 0) -> str:
     )
 
 
-DEFAULT_USER_RULES_TEXT = (
+DEFAULT_BUY_RULES_TEMPLATE = (
     "[사용자 매수 규칙]\n"
     "- 최근 10캔들 평균 거래대금 ≥ 3억\n"
     "- 시총 1조 이하: 최근 30캔들 중 (고가-종가)/종가 × 100 이 8~30%인 캔들 존재\n"
@@ -175,6 +178,8 @@ DEFAULT_USER_RULES_TEXT = (
     "- 시장 국면별 진입: 안전=상승장만 / 위험=상승+조정장 / 고위험=전부\n"
     "- 킬스위치 발동 시(WTI≥100 AND VIX≥24) 3개월+ 장기 투자는 거래 중지"
 )
+# 하위 호환용 별칭
+DEFAULT_USER_RULES_TEXT = DEFAULT_BUY_RULES_TEMPLATE
 
 
 def build_buy_prompt(
@@ -208,14 +213,20 @@ def build_buy_market_info(
     market_context: str = "",
     candidates_text: str = "",
     include_user_rules: bool = True,
+    user_id: int = 0,
     extra: str = "",
 ) -> str:
-    """build_buy_prompt 의 market_info 파라미터로 넣을 통합 컨텍스트를 조립합니다."""
+    """build_buy_prompt 의 market_info 파라미터로 넣을 통합 컨텍스트를 조립합니다.
+
+    user_id > 0 이면 DB에 저장된 사용자별 '매수 규칙 템플릿'을 사용하고,
+    없거나 0이면 DEFAULT_BUY_RULES_TEMPLATE 로 폴백합니다.
+    """
     blocks: list[str] = []
     if market_context:
         blocks.append(market_context)
     if include_user_rules:
-        blocks.append(DEFAULT_USER_RULES_TEXT)
+        rules = load_prompts(user_id=user_id).get("buy_rules") or DEFAULT_BUY_RULES_TEMPLATE
+        blocks.append(rules)
     if candidates_text:
         blocks.append(candidates_text)
     if extra:

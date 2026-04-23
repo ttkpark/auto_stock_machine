@@ -179,11 +179,12 @@ def run_buy_logic(
 
     screener_name_set = {c["name"] for c in screener_candidates}
 
-    # 통합 market_info 구성
+    # 통합 market_info 구성 (user_id 기반으로 사용자별 룰 로드)
     from utils.prompt_manager import build_buy_market_info, build_buy_prompt
     full_market_info = build_buy_market_info(
         market_context=market_context,
         candidates_text=candidates_text,
+        user_id=trace.user_id,
     )
 
     recommendations = []

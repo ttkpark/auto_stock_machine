@@ -1202,24 +1202,33 @@ def create_app() -> Flask:
     @_login_required
     def prompts_page():
         import db as _db
-        from utils.prompt_manager import DEFAULT_BUY_TEMPLATE, DEFAULT_SELL_TEMPLATE, DEFAULT_BUDGET_TEMPLATE
+        from utils.prompt_manager import (
+            DEFAULT_BUY_TEMPLATE,
+            DEFAULT_SELL_TEMPLATE,
+            DEFAULT_BUDGET_TEMPLATE,
+            DEFAULT_BUY_RULES_TEMPLATE,
+        )
         row = _db.get_user_prompts(g.user_id)
         if row:
             buy_tpl = row.get("buy_template", "") or DEFAULT_BUY_TEMPLATE
             sell_tpl = row.get("sell_template", "") or DEFAULT_SELL_TEMPLATE
             budget_tpl = row.get("budget_template", "") or DEFAULT_BUDGET_TEMPLATE
+            rules_tpl = row.get("buy_rules_template", "") or DEFAULT_BUY_RULES_TEMPLATE
         else:
             buy_tpl = DEFAULT_BUY_TEMPLATE
             sell_tpl = DEFAULT_SELL_TEMPLATE
             budget_tpl = DEFAULT_BUDGET_TEMPLATE
+            rules_tpl = DEFAULT_BUY_RULES_TEMPLATE
         return render_template(
             "prompts.html",
             buy_template=buy_tpl,
             sell_template=sell_tpl,
             budget_template=budget_tpl,
+            buy_rules_template=rules_tpl,
             default_buy=DEFAULT_BUY_TEMPLATE,
             default_sell=DEFAULT_SELL_TEMPLATE,
             default_budget=DEFAULT_BUDGET_TEMPLATE,
+            default_buy_rules=DEFAULT_BUY_RULES_TEMPLATE,
             prompts_path=str(PROMPTS_PATH),
         )
 
@@ -1230,11 +1239,18 @@ def create_app() -> Flask:
         buy_template = request.form.get("buy_template", "").strip()
         sell_template = request.form.get("sell_template", "").strip()
         budget_template = request.form.get("budget_template", "").strip()
+        buy_rules_template = request.form.get("buy_rules_template", "").strip()
         if not buy_template or not sell_template or not budget_template:
             flash("매수/매도/예산 프롬프트는 비워둘 수 없습니다.", "error")
             return redirect(url_for("prompts_page"))
         try:
-            _db.save_user_prompts(g.user_id, buy_template, sell_template, budget_template)
+            _db.save_user_prompts(
+                g.user_id,
+                buy_template,
+                sell_template,
+                budget_template,
+                buy_rules_template,
+            )
             flash("프롬프트가 저장되었습니다. 다음 AI 실행부터 반영됩니다.", "success")
         except Exception as e:
             flash(f"저장 실패: {e}", "error")
@@ -1244,9 +1260,20 @@ def create_app() -> Flask:
     @_login_required
     def prompts_reset():
         import db as _db
-        from utils.prompt_manager import DEFAULT_BUY_TEMPLATE, DEFAULT_SELL_TEMPLATE, DEFAULT_BUDGET_TEMPLATE
+        from utils.prompt_manager import (
+            DEFAULT_BUY_TEMPLATE,
+            DEFAULT_SELL_TEMPLATE,
+            DEFAULT_BUDGET_TEMPLATE,
+            DEFAULT_BUY_RULES_TEMPLATE,
+        )
         try:
-            _db.save_user_prompts(g.user_id, DEFAULT_BUY_TEMPLATE, DEFAULT_SELL_TEMPLATE, DEFAULT_BUDGET_TEMPLATE)
+            _db.save_user_prompts(
+                g.user_id,
+                DEFAULT_BUY_TEMPLATE,
+                DEFAULT_SELL_TEMPLATE,
+                DEFAULT_BUDGET_TEMPLATE,
+                DEFAULT_BUY_RULES_TEMPLATE,
+            )
             flash("프롬프트를 기본값으로 초기화했습니다.", "success")
         except Exception as e:
             flash(f"초기화 실패: {e}", "error")
