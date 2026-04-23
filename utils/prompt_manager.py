@@ -26,7 +26,9 @@ DEFAULT_BUY_TEMPLATE = (
     "{budget_instruction}\n"
     "{budget_per_stock_info}"
     "{market_info_line}\n\n"
-    "이 예수금 한도 내에서 지금 매수하면 좋을 한국 주식을 딱 1개만 추천해 주세요.\n"
+    "위 정보를 바탕으로 지금 매수하면 좋을 한국 주식을 딱 1개만 추천해 주세요.\n"
+    "후보군이 제공된 경우 반드시 그 목록 안에서만 선택하고, 선택 근거를 룰·시장국면·지표로 설명해 주세요.\n"
+    "후보군이 비어 있거나 제공되지 않은 경우에만 자유롭게 추천할 수 있습니다.\n"
     "반드시 한국거래소(KRX)에 실제 상장된 정확한 종목명을 사용해야 합니다.\n"
     "답변은 반드시 아래 JSON 형식으로만 출력하세요. 다른 설명은 절대 하지 마세요.\n"
     '{"종목명": "삼성전자", "이유": "저평가 구간 진입"}'
@@ -161,10 +163,33 @@ def build_budget_instruction(user_id: int = 0) -> str:
     )
 
 
-def build_buy_prompt(balance: int, market_info: str = "", budget_per_stock: int = 0, user_id: int = 0) -> str:
+DEFAULT_USER_RULES_TEXT = (
+    "[사용자 매수 규칙]\n"
+    "- 최근 10캔들 평균 거래대금 ≥ 3억\n"
+    "- 시총 1조 이하: 최근 30캔들 중 (고가-종가)/종가 × 100 이 8~30%인 캔들 존재\n"
+    "- 시총 1~5조: 최근 30캔들 중 (고가-종가)/종가 × 100 이 12~30%인 캔들 존재\n"
+    "- 최근 1~2달 거래량 평균 ≥ 최근 1년 거래량 평균 × 300%\n"
+    "- 강력한 거래량과 함께 박스권 상단을 뚫어 상승 추세로 돌아선 종목\n"
+    "- 매수 타점: 오늘 종가가 20일선 대비 -4 ~ -3%\n"
+    "- KOSDAQ 매수 금지: 4년 연속 '부채총계>자본총계' 또는 '부채총계/자산총계 ≥ 50%'\n"
+    "- 시장 국면별 진입: 안전=상승장만 / 위험=상승+조정장 / 고위험=전부\n"
+    "- 킬스위치 발동 시(WTI≥100 AND VIX≥24) 3개월+ 장기 투자는 거래 중지"
+)
+
+
+def build_buy_prompt(
+    balance: int,
+    market_info: str = "",
+    budget_per_stock: int = 0,
+    user_id: int = 0,
+) -> str:
+    """매수 프롬프트 조립.
+
+    market_info 에 시장 국면·사용자 룰·스크리너 후보 등을 모두 담아 전달합니다.
+    (bot_service.run_buy_logic 에서 build_buy_market_info 로 생성)
+    """
     template = load_prompts(user_id=user_id)["buy"]
-    market_info_line = f"추가 시장 정보: {market_info}" if market_info else ""
-    # budget_per_stock이 지정되면 AI에게 할당 예산 정보 제공
+    market_info_line = market_info if market_info else ""
     budget_per_stock_info = ""
     if budget_per_stock > 0:
         budget_per_stock_info = f"각 종목당 할당 예산은 약 {budget_per_stock:,}원입니다.\n"
@@ -177,6 +202,25 @@ def build_buy_prompt(balance: int, market_info: str = "", budget_per_stock: int 
             "market_info_line": market_info_line,
         },
     )
+
+
+def build_buy_market_info(
+    market_context: str = "",
+    candidates_text: str = "",
+    include_user_rules: bool = True,
+    extra: str = "",
+) -> str:
+    """build_buy_prompt 의 market_info 파라미터로 넣을 통합 컨텍스트를 조립합니다."""
+    blocks: list[str] = []
+    if market_context:
+        blocks.append(market_context)
+    if include_user_rules:
+        blocks.append(DEFAULT_USER_RULES_TEXT)
+    if candidates_text:
+        blocks.append(candidates_text)
+    if extra:
+        blocks.append(extra)
+    return "\n\n".join(blocks)
 
 
 def build_ask_prompt(stock_name: str, ticker: str, current_price: int, user_id: int = 0) -> str:

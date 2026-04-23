@@ -41,11 +41,19 @@ class BaseAnalyzer(ABC):
     """AI 분석기 인터페이스"""
 
     @abstractmethod
-    def recommend_buy(self, balance: int, market_info: str = "") -> Optional[BuyRecommendation]:
+    def recommend_buy(
+        self,
+        balance: int,
+        market_info: str = "",
+        budget_per_stock: int = 0,
+        user_id: int = 0,
+    ) -> Optional[BuyRecommendation]:
         """
         매수 종목 추천.
         balance: 사용 가능한 예수금(원)
         market_info: 추가 시장 정보 (선택사항)
+        budget_per_stock: 종목당 할당 예산(원). 0이면 프롬프트에 포함하지 않음.
+        user_id: 사용자별 커스텀 프롬프트 로드용. 0이면 기본 템플릿 사용.
         반환: BuyRecommendation 또는 추천 불가 시 None
         """
         pass

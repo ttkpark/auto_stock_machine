@@ -41,9 +41,20 @@ class OpenAIAnalyzer(BaseAnalyzer):
         )
         return response.choices[0].message.content.strip()
 
-    def recommend_buy(self, balance: int, market_info: str = "") -> Optional[BuyRecommendation]:
+    def recommend_buy(
+        self,
+        balance: int,
+        market_info: str = "",
+        budget_per_stock: int = 0,
+        user_id: int = 0,
+    ) -> Optional[BuyRecommendation]:
         self.last_recommendation_error = ""
-        prompt = build_buy_prompt(balance=balance, market_info=market_info)
+        prompt = build_buy_prompt(
+            balance=balance,
+            market_info=market_info,
+            budget_per_stock=budget_per_stock,
+            user_id=user_id,
+        )
         try:
             raw_text = self._chat(prompt)
             parsed = self._parse_json(raw_text)

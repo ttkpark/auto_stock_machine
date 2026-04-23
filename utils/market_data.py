@@ -91,6 +91,121 @@ class MarketDataProvider:
             or index_data.get("kosdaq_change_pct", 0) <= threshold
         )
 
+    def classify_regime(self, index_code: str) -> str:
+        """지수를 '상승장/조정장/하락장/알수없음'으로 분류.
+
+        기준:
+        - 종가가 20일선 위 AND 최근 20봉 고점이 직전 20봉 고점보다 높으면 상승장
+        - 종가가 20일선 위지만 고점 갱신 실패면 조정장
+        - 종가가 20일선 아래면 하락장
+        """
+        try:
+            import FinanceDataReader as fdr
+
+            end = datetime.now()
+            start = end - timedelta(days=90)
+            df = fdr.DataReader(
+                index_code,
+                start.strftime("%Y-%m-%d"),
+                end.strftime("%Y-%m-%d"),
+            )
+            if df is None or len(df) < 22:
+                return "알수없음"
+            closes = df["Close"]
+            ma20 = float(closes.rolling(20).mean().iloc[-1])
+            cur = float(closes.iloc[-1])
+            recent_high = float(closes.iloc[-20:].max())
+            prev_high = (
+                float(closes.iloc[-40:-20].max())
+                if len(closes) >= 40
+                else recent_high
+            )
+            above_ma = cur > ma20
+            higher_high = recent_high >= prev_high
+            if above_ma and higher_high:
+                return "상승장"
+            if above_ma:
+                return "조정장"
+            return "하락장"
+        except Exception as e:
+            logger.warning(f"regime 판정 실패 ({index_code}): {e}")
+            return "알수없음"
+
+    def get_oil_vix(self) -> dict | None:
+        """WTI 유가와 VIX 지수 현재치. 일부만 받아도 반환. 전부 실패면 None."""
+        try:
+            import FinanceDataReader as fdr
+        except ImportError:
+            return None
+
+        end = datetime.now()
+        start = end - timedelta(days=14)
+
+        def _try(codes: list[str]) -> float | None:
+            for code in codes:
+                try:
+                    df = fdr.DataReader(
+                        code,
+                        start.strftime("%Y-%m-%d"),
+                        end.strftime("%Y-%m-%d"),
+                    )
+                    if df is not None and not df.empty:
+                        return float(df["Close"].iloc[-1])
+                except Exception:
+                    continue
+            return None
+
+        wti = _try(["CL=F", "WTI"])
+        vix = _try(["VIX", "^VIX"])
+        if wti is None and vix is None:
+            return None
+        return {"wti": wti, "vix": vix}
+
+    def build_buy_market_context(self, risk_profile: str = "normal") -> str:
+        """매수 판단용 시장 국면·킬스위치·투자 성향을 한국어 텍스트로 요약."""
+        lines: list[str] = []
+
+        idx = self.get_market_index_change() or {}
+        kospi_regime = self.classify_regime("KS11")
+        kosdaq_regime = self.classify_regime("KQ11")
+        kospi_chg = idx.get("kospi_change_pct", 0.0)
+        kosdaq_chg = idx.get("kosdaq_change_pct", 0.0)
+        kospi_trend = idx.get("kospi_5d_trend", "알수없음")
+        kosdaq_trend = idx.get("kosdaq_5d_trend", "알수없음")
+        lines.append(
+            f"[시장 국면] KOSPI: {kospi_regime} (전일대비 {kospi_chg:+.2f}%, 5일 추세 {kospi_trend}) "
+            f"/ KOSDAQ: {kosdaq_regime} (전일대비 {kosdaq_chg:+.2f}%, 5일 추세 {kosdaq_trend})"
+        )
+
+        oil_vix = self.get_oil_vix()
+        if oil_vix:
+            wti = oil_vix.get("wti")
+            vix = oil_vix.get("vix")
+            wti_str = f"{wti:.1f}" if wti is not None else "?"
+            vix_str = f"{vix:.1f}" if vix is not None else "?"
+            kill = (wti is not None and wti >= 100) and (vix is not None and vix >= 24)
+            kill_str = "발동 (장기투자 기준 거래 중지)" if kill else "미발동"
+            lines.append(f"[킬스위치] WTI {wti_str} / VIX {vix_str} → {kill_str}")
+
+        guide_map = {
+            "safe": "안전 추구 — 상승장에서만 매수",
+            "normal": "위험 — 상승장·조정장에서 매수, 하락장 매수 금지",
+            "high": "고위험 — 상승장·조정장·하락장 모두 매수 가능",
+        }
+        guide = guide_map.get(risk_profile, guide_map["normal"])
+        lines.append(f"[투자 성향] {risk_profile} — {guide}")
+
+        return "\n".join(lines)
+
+    def is_kill_switch_on(self) -> bool:
+        """WTI ≥ 100 AND VIX ≥ 24 이면 True."""
+        oil_vix = self.get_oil_vix()
+        if not oil_vix:
+            return False
+        wti = oil_vix.get("wti")
+        vix = oil_vix.get("vix")
+        return (wti is not None and wti >= 100) and (vix is not None and vix >= 24)
+
     # ------------------------------------------------------------------
     # 기술 지표 계산 (순수 pandas)
     # ------------------------------------------------------------------

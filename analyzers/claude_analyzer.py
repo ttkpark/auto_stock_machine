@@ -55,9 +55,20 @@ class ClaudeAnalyzer(BaseAnalyzer):
                 logger.error(f"[ClaudeAnalyzer] 모델 호출 실패 ({model_name}): {e}")
         raise RuntimeError(f"Claude 모델 호출 실패: {last_error}")
 
-    def recommend_buy(self, balance: int, market_info: str = "") -> Optional[BuyRecommendation]:
+    def recommend_buy(
+        self,
+        balance: int,
+        market_info: str = "",
+        budget_per_stock: int = 0,
+        user_id: int = 0,
+    ) -> Optional[BuyRecommendation]:
         self.last_recommendation_error = ""
-        prompt = build_buy_prompt(balance=balance, market_info=market_info)
+        prompt = build_buy_prompt(
+            balance=balance,
+            market_info=market_info,
+            budget_per_stock=budget_per_stock,
+            user_id=user_id,
+        )
         try:
             message = self._create_message_with_fallback(prompt)
             raw_text = message.content[0].text.strip()

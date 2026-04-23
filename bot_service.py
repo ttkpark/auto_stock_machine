@@ -11,9 +11,18 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Literal
 
+import os
+
 import config as config_module
 from notifiers import TelegramNotifier
-from utils import DecisionMaker, HoldingsTracker, MarketDataProvider, StockValidator
+from utils import (
+    DecisionMaker,
+    HoldingsTracker,
+    MarketDataProvider,
+    StockValidator,
+    format_candidates_for_prompt,
+    screen_buy_candidates,
+)
 
 BotMode = Literal["buy", "sell", "status", "ask"]
 TRACE_PATH = Path("data/ai_traces.jsonl")
@@ -82,7 +91,7 @@ def run_buy_logic(
     cfg,
     trace: TraceRecorder,
 ):
-    """매수 로직: AI 다수결 종목 발굴 → 환각 검증 → 매수 주문"""
+    """매수 로직: 시장 국면·킬스위치·룰 스크리너 → AI 다수결 → 검증 → 매수 주문"""
     logger.info("=" * 50)
     logger.info("[매수 로직] 시작")
 
@@ -98,6 +107,85 @@ def run_buy_logic(
         trace.record("buy_skipped", reason=msg)
         return
 
+    # ── 0단계: 시장 국면·킬스위치·사용자 룰 컨텍스트 구축 ──
+    def _user_setting(key: str, default: str = "") -> str:
+        """DB(user_id>0) 우선 → os.environ 폴백. 둘 다 없으면 default."""
+        if trace.user_id > 0:
+            try:
+                import db as _db
+                val = (_db.get_user_config(trace.user_id).get(key, "") or "").strip()
+                if val:
+                    return val
+            except Exception:
+                pass
+        return os.environ.get(key, default).strip() or default
+
+    risk_profile = (_user_setting("RISK_PROFILE", "normal").lower() or "normal")
+    long_term_horizon = _user_setting("LONG_TERM_HORIZON", "").lower() == "true"
+    market_data = MarketDataProvider()
+
+    try:
+        market_context = market_data.build_buy_market_context(risk_profile=risk_profile)
+    except Exception as e:
+        logger.warning(f"시장 컨텍스트 생성 실패: {e}")
+        market_context = ""
+    trace.record(
+        "buy_market_context",
+        risk_profile=risk_profile,
+        long_term_horizon=long_term_horizon,
+        context=market_context,
+    )
+
+    # 킬스위치 하드 게이트 (장기 투자 설정일 때만)
+    if long_term_horizon:
+        try:
+            if market_data.is_kill_switch_on():
+                msg = "WTI≥100 AND VIX≥24 — 3개월+ 장기 투자 거래 중지 (킬스위치 발동)"
+                logger.warning(msg)
+                notifier.send(f"[매수 중지] {msg}")
+                trace.record("buy_kill_switch", reason=msg)
+                return
+        except Exception as e:
+            logger.warning(f"킬스위치 판정 실패 (무시하고 진행): {e}")
+
+    # ── 0-b 단계: 룰 스크리너 실행 ──
+    use_screener = _user_setting("USE_RULE_SCREENER", "true").lower() != "false"
+    screener_candidates: list[dict] = []
+    candidates_text = ""
+    if use_screener:
+        try:
+            universe_cap_raw = _user_setting("SCREENER_UNIVERSE_CAP", "").strip()
+            universe_cap = int(universe_cap_raw) if universe_cap_raw.isdigit() else None
+            screener_candidates = screen_buy_candidates(pre_universe_cap=universe_cap)
+            candidates_text = format_candidates_for_prompt(screener_candidates)
+            trace.record(
+                "buy_screener_result",
+                count=len(screener_candidates),
+                candidates=[
+                    {"name": c["name"], "code": c["code"], "market": c["market"]}
+                    for c in screener_candidates
+                ],
+            )
+        except Exception as e:
+            logger.warning(f"스크리너 실행 실패 (빈 후보로 진행): {e}")
+            trace.record("buy_screener_error", error=str(e))
+
+        if not screener_candidates:
+            msg = "룰 스크리너 통과 종목 없음. 오늘은 매수하지 않습니다."
+            logger.info(msg)
+            notifier.send(f"[매수 스킵] {msg}")
+            trace.record("buy_skipped", reason=msg)
+            return
+
+    screener_name_set = {c["name"] for c in screener_candidates}
+
+    # 통합 market_info 구성
+    from utils.prompt_manager import build_buy_market_info, build_buy_prompt
+    full_market_info = build_buy_market_info(
+        market_context=market_context,
+        candidates_text=candidates_text,
+    )
+
     recommendations = []
     # AI 추천 시 사용할 예상 budget_per_stock (최악의 경우: MAX_BUY_STOCKS 종목 분산)
     max_buy_stocks = int(getattr(cfg, "MAX_BUY_STOCKS", 1))
@@ -108,11 +196,20 @@ def run_buy_logic(
         analyzer_name = analyzer.__class__.__name__
         # 프롬프트 추적: build_buy_prompt로 실제 전송 프롬프트 복원
         try:
-            from utils.prompt_manager import build_buy_prompt
-            sent_prompt = build_buy_prompt(balance=balance, budget_per_stock=estimated_budget_per_stock)
+            sent_prompt = build_buy_prompt(
+                balance=balance,
+                market_info=full_market_info,
+                budget_per_stock=estimated_budget_per_stock,
+                user_id=trace.user_id,
+            )
         except Exception:
             sent_prompt = ""
-        rec = analyzer.recommend_buy(balance=balance)
+        rec = analyzer.recommend_buy(
+            balance=balance,
+            market_info=full_market_info,
+            budget_per_stock=estimated_budget_per_stock,
+            user_id=trace.user_id,
+        )
         if rec:
             logger.info(f"[{rec.ai_model}] 추천: {rec.stock_name} - {rec.reason}")
             recommendations.append(rec)
@@ -131,6 +228,30 @@ def run_buy_logic(
                 reason=getattr(analyzer, "last_recommendation_error", "") or "추천 없음",
                 prompt=sent_prompt,
             )
+
+    # 스크리너를 사용한 경우 AI가 후보군 밖으로 나간 추천은 투표에서 제외
+    if use_screener and screener_name_set:
+        filtered_recs = []
+        for rec in recommendations:
+            if rec.stock_name in screener_name_set:
+                filtered_recs.append(rec)
+                continue
+            # 부분일치 허용 (AI가 약칭 사용한 경우)
+            partial = [n for n in screener_name_set if rec.stock_name in n or n in rec.stock_name]
+            if len(partial) == 1:
+                rec.stock_name = partial[0]
+                filtered_recs.append(rec)
+                continue
+            logger.warning(
+                f"[후보군 벗어남] {rec.ai_model} 추천 '{rec.stock_name}'은 스크리너 통과 종목이 아님 → 투표 제외"
+            )
+            trace.record(
+                "buy_off_candidate",
+                ai_model=rec.ai_model,
+                stock_name=rec.stock_name,
+                reason="스크리너 후보군 외 종목",
+            )
+        recommendations = filtered_recs
 
     decision_maker = DecisionMaker(min_consensus=cfg.MIN_AI_CONSENSUS)
     agreed_stock_names = decision_maker.find_buy_consensus_candidates(
