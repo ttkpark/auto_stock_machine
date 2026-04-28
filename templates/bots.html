@@ -84,6 +84,7 @@ const CONFIG_SCHEMA = {
     {key:"take_profit_rate", label:"익절률 (%)", type:"number", step:0.5, default:5.0},
     {key:"atr_multiplier", label:"ATR 배수", type:"number", step:0.5, default:2.0},
     {key:"crash_threshold", label:"급락 기준 (%)", type:"number", step:0.5, default:-3.5},
+    {key:"no_stop_loss", label:"손절 금지", type:"checkbox", default:false},
   ],
   monitor: [
     {key:"check_interval_sec", label:"점검 주기 (초)", type:"number", step:60, default:300},
@@ -97,18 +98,33 @@ let editBotId = null;
 
 function renderConfigFields(container, botType, values) {
   const fields = CONFIG_SCHEMA[botType] || [];
-  container.innerHTML = fields.map(f => `
-    <div class="config-row">
-      <label>${f.label}</label>
-      <input type="${f.type}" step="${f.step}" name="${f.key}" value="${values[f.key] !== undefined ? values[f.key] : f.default}">
-    </div>
-  `).join('') || '<p class="sub">추가 설정 없음</p>';
+  container.innerHTML = fields.map(f => {
+    const cur = values[f.key] !== undefined ? values[f.key] : f.default;
+    if (f.type === 'checkbox') {
+      return `
+        <div class="config-row">
+          <label>${f.label}</label>
+          <input type="checkbox" name="${f.key}" ${cur ? 'checked' : ''}>
+        </div>`;
+    }
+    return `
+      <div class="config-row">
+        <label>${f.label}</label>
+        <input type="${f.type}" step="${f.step}" name="${f.key}" value="${cur}">
+      </div>`;
+  }).join('') || '<p class="sub">추가 설정 없음</p>';
 }
 
 function getConfigFromContainer(container) {
   const cfg = {};
   container.querySelectorAll('input[name]').forEach(inp => {
-    cfg[inp.name] = inp.type === 'number' ? parseFloat(inp.value) : inp.value;
+    if (inp.type === 'checkbox') {
+      cfg[inp.name] = inp.checked;
+    } else if (inp.type === 'number') {
+      cfg[inp.name] = parseFloat(inp.value);
+    } else {
+      cfg[inp.name] = inp.value;
+    }
   });
   return cfg;
 }
@@ -119,17 +135,17 @@ function updateConfigFields() {
 }
 
 function showCreateModal() {
-  document.getElementById('create-modal').dataset.show = "1";
+  document.getElementById('create-modal').style.display = 'flex';
   updateConfigFields();
 }
-function hideCreateModal() { document.getElementById('create-modal').dataset.show = ""; }
+function hideCreateModal() { document.getElementById('create-modal').style.display = 'none'; }
 function showEditModal(bot) {
   editBotId = bot.id;
   document.getElementById('edit-bot-name').textContent = bot.name;
   renderConfigFields(document.getElementById('edit-config-fields'), bot.bot_type, bot.config || {});
-  document.getElementById('edit-modal').dataset.show = "1";
+  document.getElementById('edit-modal').style.display = 'flex';
 }
-function hideEditModal() { document.getElementById('edit-modal').dataset.show = ""; editBotId = null; }
+function hideEditModal() { document.getElementById('edit-modal').style.display = 'none'; editBotId = null; }
 
 async function loadBots() {
   const resp = await fetch('/api/v1/bots');

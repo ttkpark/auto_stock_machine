@@ -446,6 +446,47 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
         trace.record("sell_skipped", reason="보유 종목 없음")
         return
 
+    # ── 손절 금지 (no_stop_loss) 체크 ──
+    # 활성화된 sell_auto 봇 중 하나라도 no_stop_loss=True이면 적용
+    no_stop_loss_enabled = False
+    try:
+        import db as _db
+        for _bot in _db.get_user_bots(trace.user_id):
+            if (_bot.get("bot_type") == "sell_auto"
+                    and _bot.get("enabled")
+                    and _bot.get("config", {}).get("no_stop_loss")):
+                no_stop_loss_enabled = True
+                break
+    except Exception:
+        pass
+
+    if no_stop_loss_enabled:
+        loss_skipped = [h for h in holdings if h["profit_rate"] < 0]
+        remaining = [h for h in holdings if h["profit_rate"] >= 0]
+        for h in loss_skipped:
+            logger.info(
+                f"[손절 방지] {h['name']} ({h['ticker']}) "
+                f"수익률 {h['profit_rate']:.1f}% — 매도 로직 취소"
+            )
+            notifier.send(
+                f"[손절 방지] {h['name']} ({h['ticker']})\n"
+                f"수익률 {h['profit_rate']:+.1f}% (손실 중)\n"
+                f"손절 금지 설정으로 매도 로직을 건너뜁니다."
+            )
+            trace.record(
+                "sell_no_stop_loss_skip",
+                stock_name=h["name"],
+                ticker=h["ticker"],
+                qty=h["qty"],
+                profit_rate=h["profit_rate"],
+                reason="no_stop_loss 활성화 — 손실 종목 매도 로직 취소",
+            )
+        if not remaining:
+            logger.info("[매도 로직] 손절 방지로 모든 손실 종목 스킵, 매도 가능 종목 없음")
+            trace.record("sell_skipped", reason="no_stop_loss로 모든 손실 종목 스킵")
+            return
+        holdings = remaining
+
     # 헬퍼 초기화
     market_data = MarketDataProvider()
     tracker = HoldingsTracker(user_id=trace.user_id)

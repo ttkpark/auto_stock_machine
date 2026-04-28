@@ -901,6 +901,8 @@ def _load_schedule_snapshot(user_id: int = 0) -> Dict[str, Any]:
 def create_app() -> Flask:
     app = Flask(__name__)
     app.config["SECRET_KEY"] = os.environ.get("WEB_ADMIN_SESSION_SECRET") or secrets.token_hex(24)
+    app.config["TEMPLATES_AUTO_RELOAD"] = True
+    app.jinja_env.auto_reload = True
 
     from datetime import timedelta
     app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=12)

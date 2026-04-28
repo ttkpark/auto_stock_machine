@@ -35,6 +35,7 @@ DEFAULT_BOT_CONFIG = {
         "take_profit_rate": 5.0,
         "atr_multiplier": 2.0,
         "crash_threshold": -3.5,
+        "no_stop_loss": False,
     },
     "monitor": {
         "check_interval_sec": 300,
