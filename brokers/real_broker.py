@@ -11,7 +11,7 @@ import os
 import requests
 import logging
 from typing import Optional
-from .base_broker import BaseBroker
+from .base_broker import BaseBroker, request_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +74,7 @@ class RealBroker(BaseBroker):
             "appkey": self.app_key,
             "appsecret": self.app_secret,
         }
-        resp = requests.post(url, json=payload, timeout=10)
-        resp.raise_for_status()
+        resp = request_with_retry("POST", url, json=payload, label="토큰발급")
         data = resp.json()
         self._access_token = data["access_token"]
         self._save_cached_token(self._access_token, int(data.get("expires_in", 21600)))
@@ -114,8 +113,7 @@ class RealBroker(BaseBroker):
             "CMA_EVLU_AMT_ICLD_YN": "Y",
             "OVRS_ICLD_YN": "N",
         }
-        resp = requests.get(url, headers=headers, params=params, timeout=10)
-        resp.raise_for_status()
+        resp = request_with_retry("GET", url, headers=headers, params=params, label="예수금조회")
         data = resp.json()
 
         output = data.get("output")
@@ -148,8 +146,7 @@ class RealBroker(BaseBroker):
             "CTX_AREA_FK100": "",
             "CTX_AREA_NK100": "",
         }
-        resp = requests.get(url, headers=headers, params=params, timeout=10)
-        resp.raise_for_status()
+        resp = request_with_retry("GET", url, headers=headers, params=params, label="잔고조회")
         data = resp.json()
 
         holdings = []
@@ -182,8 +179,7 @@ class RealBroker(BaseBroker):
 
         params = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": ticker}
         try:
-            resp = requests.get(url, headers=headers, params=params, timeout=10)
-            resp.raise_for_status()
+            resp = request_with_retry("GET", url, headers=headers, params=params, label=f"현재가({ticker})")
             price = int(float(resp.json()["output"]["stck_prpr"]))
             return price
         except Exception as e:

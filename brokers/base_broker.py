@@ -4,8 +4,71 @@
 C++의 순수 가상 클래스와 동일한 역할.
 MockBroker, RealBroker 모두 이 규격을 반드시 구현해야 합니다.
 """
+import time
+import logging
 from abc import ABC, abstractmethod
 from typing import Optional
+
+import requests
+
+logger = logging.getLogger(__name__)
+
+# 일시적 장애로 보고 재시도할 HTTP 상태코드
+RETRY_STATUS_CODES = (500, 502, 503, 504, 429)
+
+
+def request_with_retry(
+    method: str,
+    url: str,
+    *,
+    max_attempts: int = 3,
+    base_delay: float = 1.0,
+    timeout: int = 10,
+    retry_statuses: tuple = RETRY_STATUS_CODES,
+    label: str = "",
+    **kwargs,
+) -> requests.Response:
+    """조회성 KIS API 호출용 재시도 래퍼.
+
+    일시적 오류(5xx/429, 연결 오류, 타임아웃)에 한해 지수 백오프(1s→2s→4s)로
+    최대 max_attempts회 재시도합니다. 4xx(429 제외) 등 영구 오류는 즉시 전파합니다.
+
+    ⚠️ 주문(order-cash)처럼 비멱등(중복 실행이 위험한) 호출에는 사용하지 마세요.
+        조회/토큰 발급 등 안전하게 반복 가능한 호출에만 사용합니다.
+
+    반환: raise_for_status()를 통과한 requests.Response
+    """
+    last_exc: Optional[Exception] = None
+    what = label or url
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = requests.request(method, url, timeout=timeout, **kwargs)
+            # 일시적 상태코드이고 재시도 여지가 있으면 백오프 후 재시도
+            if resp.status_code in retry_statuses and attempt < max_attempts:
+                wait = base_delay * (2 ** (attempt - 1))
+                logger.warning(
+                    f"[KIS] {what} 일시적 오류 HTTP {resp.status_code} "
+                    f"— {wait:.0f}s 후 재시도 ({attempt}/{max_attempts})"
+                )
+                time.sleep(wait)
+                continue
+            # 2xx면 통과, 그 외(영구 4xx·마지막 시도의 5xx)는 예외 발생
+            resp.raise_for_status()
+            return resp
+        except (requests.ConnectionError, requests.Timeout) as e:
+            last_exc = e
+            if attempt < max_attempts:
+                wait = base_delay * (2 ** (attempt - 1))
+                logger.warning(
+                    f"[KIS] {what} 연결오류({type(e).__name__}) "
+                    f"— {wait:.0f}s 후 재시도 ({attempt}/{max_attempts})"
+                )
+                time.sleep(wait)
+                continue
+            raise
+    if last_exc:
+        raise last_exc
+    raise RuntimeError(f"[KIS] {what} 재시도 실패")
 
 
 class BaseBroker(ABC):
