@@ -41,6 +41,12 @@
                 <option value="True" {% if values[key] == "True" %}selected{% endif %}>True (실전투자)</option>
               </select>
 
+            {% elif key == "CLAUDE_CLI_ENABLED" %}
+              <select name="{{ key }}">
+                <option value="true" {% if values[key] != "false" %}selected{% endif %}>true (claude CLI 사용)</option>
+                <option value="false" {% if values[key] == "false" %}selected{% endif %}>false (사용 안 함)</option>
+              </select>
+
             {% elif key in model_options %}
               {# 선택 드롭다운 + 직접 입력 토글 #}
               {% set opts = model_options[key] %}
@@ -138,7 +144,7 @@ document.addEventListener('DOMContentLoaded', function() {
   fetch('/api/available-models')
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      var modelKeys = ['CLAUDE_MODEL_NAME', 'OPENAI_MODEL_NAME', 'GEMINI_MODEL_NAME'];
+      var modelKeys = ['CLAUDE_CLI_MODEL', 'OPENAI_MODEL_NAME'];
       modelKeys.forEach(function(key) {
         var models = data[key];
         var statusEl = document.getElementById('status-' + key);
@@ -203,7 +209,7 @@ document.addEventListener('DOMContentLoaded', function() {
       });
     })
     .catch(function(err) {
-      ['CLAUDE_MODEL_NAME', 'OPENAI_MODEL_NAME', 'GEMINI_MODEL_NAME'].forEach(function(key) {
+      ['CLAUDE_CLI_MODEL', 'OPENAI_MODEL_NAME'].forEach(function(key) {
         var statusEl = document.getElementById('status-' + key);
         if (statusEl) {
           statusEl.className = 'model-error';

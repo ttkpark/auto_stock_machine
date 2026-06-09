@@ -62,16 +62,11 @@ _SCHEDULER_STARTED = False
 
 # AI 엔진별 선택 가능한 모델 목록
 MODEL_OPTIONS: Dict[str, List[str]] = {
-    "GEMINI_MODEL_NAME": [
-        "gemini-2.0-flash",
-        "gemini-2.5-flash-preview-05-20",
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
-    ],
-    "CLAUDE_MODEL_NAME": [
-        "claude-haiku-4-5-latest",
-        "claude-sonnet-4-5-latest",
-        "claude-opus-4-6-latest",
+    # Claude는 API 키 대신 로컬 claude CLI(구독 로그인)로 동작 → CLI 모델 별칭 사용
+    "CLAUDE_CLI_MODEL": [
+        "sonnet",
+        "haiku",
+        "opus",
     ],
     "OPENAI_MODEL_NAME": [
         "gpt-4o-mini",
@@ -90,10 +85,8 @@ MANAGED_KEYS: List[str] = [
     "MIN_AI_CONSENSUS",
     "TAKE_PROFIT_RATE",
     "STOP_LOSS_RATE",
-    "GEMINI_API_KEY",
-    "GEMINI_MODEL_NAME",
-    "CLAUDE_API_KEY",
-    "CLAUDE_MODEL_NAME",
+    "CLAUDE_CLI_ENABLED",
+    "CLAUDE_CLI_MODEL",
     "OPENAI_API_KEY",
     "OPENAI_MODEL_NAME",
     "KIS_MOCK_APP_KEY",
@@ -412,16 +405,14 @@ def _count_today_ai_calls(user_id: int = 0) -> Dict[str, int]:
     """오늘자 DB trace에서 AI 엔진별 API 호출 횟수를 집계합니다."""
     import db as _db
     today_str = _cfg.now().strftime("%Y-%m-%d")
-    counts: Dict[str, int] = {"Gemini": 0, "Claude": 0, "ChatGPT": 0}
+    counts: Dict[str, int] = {"Claude": 0, "ChatGPT": 0}
     try:
         traces = _db.get_traces(user_id, limit=500)
         for t in traces:
             if not t.get("time", "").startswith(today_str):
                 continue
             analyzer = t.get("payload", {}).get("analyzer", "")
-            if "Gemini" in analyzer:
-                counts["Gemini"] += 1
-            elif "Claude" in analyzer:
+            if "Claude" in analyzer:
                 counts["Claude"] += 1
             elif "OpenAI" in analyzer:
                 counts["ChatGPT"] += 1
@@ -438,36 +429,47 @@ def _format_number(val: str) -> str:
         return val
 
 
-def _check_anthropic_usage() -> Dict[str, Any]:
-    """Anthropic Claude API 상태 및 rate limit 를 확인합니다."""
-    import requests as req
+def _check_claude_cli_usage() -> Dict[str, Any]:
+    """로컬 claude CLI(구독 로그인) 상태를 확인합니다 (API 키 미사용)."""
+    import shutil
+    import subprocess
 
-    key = os.environ.get("CLAUDE_API_KEY", "")
-    if not key:
-        return {"provider": "Anthropic Claude", "status": "not_configured"}
-    model = os.environ.get("CLAUDE_MODEL_NAME", "").strip() or "claude-haiku-4-5-latest"
+    if os.environ.get("CLAUDE_CLI_ENABLED", "true").lower() == "false":
+        return {"provider": "Claude CLI", "status": "not_configured"}
+
+    cli_path = os.environ.get("CLAUDE_CLI_PATH", "").strip() or "claude"
+    resolved = shutil.which(cli_path)
+    model = os.environ.get("CLAUDE_CLI_MODEL", "").strip() or "sonnet"
+    if not resolved:
+        return {
+            "provider": "Claude CLI",
+            "status": "error",
+            "model": model,
+            "error": "claude CLI 미설치 (npm i -g @anthropic-ai/claude-code)",
+        }
     try:
-        resp = req.post(
-            "https://api.anthropic.com/v1/messages/count_tokens",
-            headers={
-                "x-api-key": key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={"model": model, "messages": [{"role": "user", "content": "hi"}]},
-            timeout=10,
+        ver = subprocess.run(
+            [resolved, "--version"],
+            capture_output=True, text=True, timeout=10,
         )
-        if resp.status_code == 200:
-            rl = {
-                "요청 한도": _format_number(resp.headers.get("anthropic-ratelimit-requests-limit", "-")),
-                "남은 요청": _format_number(resp.headers.get("anthropic-ratelimit-requests-remaining", "-")),
-                "토큰 한도": _format_number(resp.headers.get("anthropic-ratelimit-tokens-limit", "-")),
-                "남은 토큰": _format_number(resp.headers.get("anthropic-ratelimit-tokens-remaining", "-")),
-            }
-            return {"provider": "Anthropic Claude", "status": "active", "model": model, "rate_limits": rl}
-        return {"provider": "Anthropic Claude", "status": "error", "model": model, "error": f"HTTP {resp.status_code}"}
+        version = (ver.stdout or "").strip() or "unknown"
+        # 로그인/인증 여부는 짧은 헤드리스 호출로 확인
+        ping = subprocess.run(
+            [resolved, "-p", "--output-format", "json", "--model", model,
+             "--disallowed-tools", "Bash Edit Write Read Glob Grep WebFetch WebSearch Task"],
+            input="JSON만 출력: {\"ok\":true}",
+            capture_output=True, text=True, timeout=30,
+        )
+        authed = ping.returncode == 0 and '"is_error":false' in (ping.stdout or "")
+        return {
+            "provider": "Claude CLI",
+            "status": "active" if authed else "error",
+            "model": model,
+            "rate_limits": {"버전": version, "로그인": "정상" if authed else "필요(claude login)"},
+            **({} if authed else {"error": (ping.stderr or ping.stdout or "로그인 필요").strip()[:200]}),
+        }
     except Exception as e:
-        return {"provider": "Anthropic Claude", "status": "error", "model": model, "error": str(e)[:200]}
+        return {"provider": "Claude CLI", "status": "error", "model": model, "error": str(e)[:200]}
 
 
 def _check_openai_usage() -> Dict[str, Any]:
@@ -502,33 +504,13 @@ def _check_openai_usage() -> Dict[str, Any]:
         return {"provider": "OpenAI ChatGPT", "status": "error", "model": model, "error": str(e)[:200]}
 
 
-def _check_gemini_usage() -> Dict[str, Any]:
-    """Google Gemini API 상태를 확인합니다."""
-    import requests as req
-
-    key = os.environ.get("GEMINI_API_KEY", "")
-    if not key:
-        return {"provider": "Google Gemini", "status": "not_configured"}
-    model = os.environ.get("GEMINI_MODEL_NAME", "").strip() or "gemini-2.0-flash"
-    try:
-        resp = req.get(
-            f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            return {"provider": "Google Gemini", "status": "active", "model": model, "rate_limits": None}
-        return {"provider": "Google Gemini", "status": "error", "model": model, "error": f"HTTP {resp.status_code}"}
-    except Exception as e:
-        return {"provider": "Google Gemini", "status": "error", "model": model, "error": str(e)[:200]}
-
-
 def _check_all_ai_usage(user_id: int = 0) -> Dict[str, Any]:
     """모든 AI 제공자의 상태와 오늘 호출 횟수를 종합합니다."""
     providers = []
-    for check_fn in (_check_anthropic_usage, _check_openai_usage, _check_gemini_usage):
+    for check_fn in (_check_claude_cli_usage, _check_openai_usage):
         providers.append(check_fn())
     today_calls = _count_today_ai_calls(user_id=user_id)
-    label_map = {"Anthropic Claude": "Claude", "OpenAI ChatGPT": "ChatGPT", "Google Gemini": "Gemini"}
+    label_map = {"Claude CLI": "Claude", "OpenAI ChatGPT": "ChatGPT"}
     for p in providers:
         p["today_calls"] = today_calls.get(label_map.get(p["provider"], ""), 0)
     return {"providers": providers, "checked_at": _cfg.now().strftime("%Y-%m-%d %H:%M:%S")}
@@ -537,28 +519,17 @@ def _check_all_ai_usage(user_id: int = 0) -> Dict[str, Any]:
 # ── 동적 모델 목록 조회 ─────────────────────────────────────
 
 
-def _fetch_anthropic_models() -> List[str]:
-    """Anthropic API에서 사용 가능한 모델 목록을 가져옵니다."""
-    import requests as req
+def _fetch_claude_cli_models() -> List[str]:
+    """claude CLI에서 사용 가능한 모델 별칭 목록을 반환합니다.
 
-    key = os.environ.get("CLAUDE_API_KEY", "")
-    if not key:
+    CLI는 별칭(sonnet/haiku/opus)으로 모델을 선택하므로 고정 목록을 제공합니다.
+    """
+    import shutil
+
+    cli_path = os.environ.get("CLAUDE_CLI_PATH", "").strip() or "claude"
+    if not shutil.which(cli_path):
         return []
-    try:
-        resp = req.get(
-            "https://api.anthropic.com/v1/models?limit=100",
-            headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
-            timeout=10,
-        )
-        if resp.status_code != 200:
-            return []
-        data = resp.json()
-        models = [m["id"] for m in data.get("data", []) if m.get("id")]
-        # claude 모델만 필터, 정렬 (최신순)
-        models = sorted([m for m in models if "claude" in m], reverse=True)
-        return models
-    except Exception:
-        return []
+    return ["sonnet", "haiku", "opus"]
 
 
 def _fetch_openai_models() -> List[str]:
@@ -585,41 +556,11 @@ def _fetch_openai_models() -> List[str]:
         return []
 
 
-def _fetch_gemini_models() -> List[str]:
-    """Google Gemini API에서 사용 가능한 모델 목록을 가져옵니다."""
-    import requests as req
-
-    key = os.environ.get("GEMINI_API_KEY", "")
-    if not key:
-        return []
-    try:
-        resp = req.get(
-            f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
-            timeout=10,
-        )
-        if resp.status_code != 200:
-            return []
-        data = resp.json()
-        models = []
-        for m in data.get("models", []):
-            name = m.get("name", "")  # "models/gemini-2.0-flash"
-            if name.startswith("models/"):
-                name = name[len("models/"):]
-            # generateContent 를 지원하는 모델만
-            methods = m.get("supportedGenerationMethods", [])
-            if "generateContent" in methods and "gemini" in name:
-                models.append(name)
-        return sorted(models, reverse=True)
-    except Exception:
-        return []
-
-
 def _fetch_all_available_models() -> Dict[str, List[str]]:
     """모든 AI 제공자에서 사용 가능한 모델 목록을 가져옵니다."""
     return {
-        "CLAUDE_MODEL_NAME": _fetch_anthropic_models(),
+        "CLAUDE_CLI_MODEL": _fetch_claude_cli_models(),
         "OPENAI_MODEL_NAME": _fetch_openai_models(),
-        "GEMINI_MODEL_NAME": _fetch_gemini_models(),
     }
 
 

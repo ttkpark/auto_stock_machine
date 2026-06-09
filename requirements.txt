@@ -7,13 +7,11 @@ python-dotenv>=1.0.0
 # 웹 설정 관리자
 Flask>=3.0.0
 
-# Google Gemini AI
-google-generativeai>=0.7.0
+# Anthropic Claude는 API 패키지 대신 로컬 `claude` CLI(구독 로그인)로 동작합니다.
+#   설치: npm install -g @anthropic-ai/claude-code  &&  claude login
+#   (별도 Python 패키지 불필요)
 
-# Anthropic Claude AI
-anthropic>=0.34.0
-
-# OpenAI ChatGPT AI
+# OpenAI ChatGPT AI (선택)
 openai>=1.0.0
 
 # 텔레그램 봇

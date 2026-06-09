@@ -75,10 +75,27 @@ source "${INSTALL_DIR}/.venv/bin/activate"
 python -m pip install --upgrade pip
 python -m pip install -r "${INSTALL_DIR}/requirements.txt"
 
-echo "[5/7] Creating runtime directories..."
+echo "[5/8] Installing claude CLI (Claude Code) for API-key-free AI judgement..."
+if command -v claude >/dev/null 2>&1; then
+  echo "  - claude CLI already installed ($(claude --version 2>/dev/null || echo unknown))"
+else
+  if ! command -v node >/dev/null 2>&1; then
+    echo "  - Installing Node.js 20.x..."
+    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - || echo "  - [WARN] Node.js repo setup failed; install Node manually."
+    sudo apt-get install -y nodejs || echo "  - [WARN] nodejs install failed; install Node manually."
+  fi
+  if command -v npm >/dev/null 2>&1; then
+    sudo npm install -g @anthropic-ai/claude-code || echo "  - [WARN] claude CLI install failed; run 'npm install -g @anthropic-ai/claude-code' manually."
+  else
+    echo "  - [WARN] npm not found; skipped claude CLI install."
+  fi
+fi
+echo "  - NOTE: run 'claude login' as THIS user ($(whoami)) to authenticate (no API key needed)."
+
+echo "[6/8] Creating runtime directories..."
 mkdir -p "${INSTALL_DIR}/logs" "${INSTALL_DIR}/data"
 
-echo "[6/7] Preparing .env..."
+echo "[7/8] Preparing .env..."
 if [[ ! -f "${INSTALL_DIR}/.env" ]]; then
   cp "${INSTALL_DIR}/.env.example" "${INSTALL_DIR}/.env"
   echo "  - Created .env from .env.example"
@@ -86,7 +103,7 @@ else
   echo "  - Existing .env found, keeping current values"
 fi
 
-echo "[7/7] Configuring systemd service..."
+echo "[8/8] Configuring systemd service..."
 if [[ "${INSTALL_SYSTEMD}" == "true" ]]; then
   if command -v systemctl >/dev/null 2>&1; then
     SERVICE_NAME="auto-stock-machine-web"
@@ -129,3 +146,7 @@ echo "Activate venv: source ${INSTALL_DIR}/.venv/bin/activate"
 echo "Edit env file: nano ${INSTALL_DIR}/.env"
 echo "Quick check  : ${INSTALL_DIR}/.venv/bin/python ${INSTALL_DIR}/main.py --mode status"
 echo "Service check: sudo systemctl status auto-stock-machine-web --no-pager"
+echo
+echo "IMPORTANT: Claude judgement uses the local 'claude' CLI (no API key)."
+echo "  Run ONCE as this user to authenticate:  claude login"
+echo "  Verify:  echo 'hi, reply with {\"ok\":true} only' | claude -p --model sonnet"

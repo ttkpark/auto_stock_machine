@@ -40,49 +40,43 @@ KIS_REAL_ACCOUNT_NUMBER=5000000000
 
 ---
 
-## 2. Google Gemini API
+## 2. Anthropic Claude (CLI, API 키 불필요)
 
-### 발급 방법
-1. 브라우저에서 접속:
-   **https://aistudio.google.com/app/apikey**
-2. Google 계정으로 로그인
-3. 파란색 **[Create API key]** 버튼 클릭
-4. 프로젝트 선택 (없으면 새 프로젝트 생성) → **[Create API key in existing project]**
-5. 생성된 키(`AIzaSy...` 형태) 복사
+Claude 판단은 Anthropic API 키 대신 **로컬 `claude` CLI(Claude Code)**를 구독 로그인으로 호출합니다.
+별도 API 키 발급/결제 없이 구독 계정만으로 동작합니다.
 
-### 무료 할당량
-- Gemini 1.5 Flash 기준: 분당 15회, 하루 1,500회 무료
-- 자동매매 봇 수준(하루 2~5회 호출)에서는 무료 티어로 충분
+### 설치 및 로그인 (우분투, 봇 실행 사용자로 진행)
+```bash
+# 1) Node.js 설치
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# 2) claude CLI 설치
+npm install -g @anthropic-ai/claude-code
+
+# 3) 로그인 (브라우저 인증 → ~/.claude 에 토큰 저장)
+claude login
+
+# 4) 동작 확인
+echo 'reply with {"ok":true} only' | claude -p --model sonnet
+```
+
+> systemd 서비스는 설치한 사용자(`User=`)로 동작하므로 **그 사용자로 `claude login`** 해야 합니다.
 
 ### .env 파일 입력 예시
 ```
-GEMINI_API_KEY=AIzaSyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# API 키 없음. CLI 사용 여부/모델만 지정.
+CLAUDE_CLI_ENABLED=true
+CLAUDE_CLI_MODEL=sonnet
 ```
+
+### 참고
+- 가드레일(개인 금융자문 거부) 때문에 CLI 경로는 동일한 매매 규칙을 **익명화 백테스트 프레이밍**으로 재구성해 호출합니다.
+- OpenAI ChatGPT를 추가로 교차검증에 쓰려면 `OPENAI_API_KEY`(선택)를 입력하세요.
 
 ---
 
-## 3. Anthropic Claude API
-
-### 발급 방법
-1. 브라우저에서 접속:
-   **https://console.anthropic.com**
-2. 계정 생성 또는 로그인
-3. 좌측 메뉴 → **API Keys** → **[Create Key]**
-4. 키 이름 입력 → 생성된 키(`sk-ant-...` 형태) 즉시 복사
-   (이 화면을 벗어나면 다시 볼 수 없으므로 반드시 저장!)
-
-### 비용 안내
-- Claude 3.5 Haiku 기준: 입력 1M 토큰당 $0.80, 출력 1M 토큰당 $4.00
-- 하루 2~5회 호출 기준 월 1~2달러 수준
-
-### .env 파일 입력 예시
-```
-CLAUDE_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
-
----
-
-## 4. Telegram Bot
+## 3. Telegram Bot
 
 ### BotFather로 봇 생성
 1. 텔레그램 앱에서 **@BotFather** 검색 → 대화 시작
@@ -111,7 +105,7 @@ TELEGRAM_CHAT_ID=123456789
 
 ---
 
-## 5. 최종 .env 파일 완성 예시
+## 4. 최종 .env 파일 완성 예시
 
 `.env.example` 을 복사하여 `.env` 파일을 만들고 아래와 같이 채웁니다.
 
@@ -131,9 +125,10 @@ KIS_REAL_APP_KEY=PSxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 KIS_REAL_APP_SECRET=xxxx...
 KIS_REAL_ACCOUNT_NUMBER=5000000000
 
-# AI
-GEMINI_API_KEY=AIzaSyxxxxxxxxxx
-CLAUDE_API_KEY=sk-ant-xxxxxxxxxx
+# AI (Claude는 API 키 없이 'claude login' CLI 사용)
+CLAUDE_CLI_ENABLED=true
+CLAUDE_CLI_MODEL=sonnet
+# OPENAI_API_KEY=sk-xxxxxxxxxx   # 선택
 
 # 텔레그램
 TELEGRAM_BOT_TOKEN=1234567890:AAxxxxx

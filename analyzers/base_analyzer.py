@@ -1,7 +1,7 @@
 """
 AI 분석기 추상 기반 클래스
 
-Gemini, Claude 등 모든 AI 분석기가 동일한 인터페이스를 가지도록 규격을 정의합니다.
+Claude(CLI), ChatGPT 등 모든 AI 분석기가 동일한 인터페이스를 가지도록 규격을 정의합니다.
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
