@@ -2,7 +2,7 @@
 
 다중 AI 교차 검증 기반 한국 주식 자동매매 봇
 
-여러 AI 모델(Claude · ChatGPT 등)의 다수결 합의를 통해 신뢰도 높은 종목을 발굴하고,
+두 개의 독립 AI 판단기(Claude(CLI) + Gemini)가 **동시에 동의(과반수)** 한 종목만 매매하여 신뢰도를 높이고,
 내장 스케줄러로 윈도우/리눅스 어디서든 24시간 무중단 텔레그램 알림과 함께 자동 매매를 수행합니다.
 
 > **Claude는 API 키 없이 동작합니다.** Anthropic API 대신 로컬에 설치된 `claude` CLI(Claude Code)를
@@ -12,7 +12,7 @@
 
 ## 주요 기능
 
-- **다중 AI 교차 검증**: Claude(CLI), ChatGPT 등 복수의 AI가 동의한 종목만 매수
+- **2중 AI 교차 검증**: Claude(CLI) + Gemini 두 판단기가 동의(과반수, `MIN_AI_CONSENSUS=2`)한 종목만 매수
 - **AI 환각(Hallucination) 방지**: KRX 전체 상장 종목 DB와 대조하여 존재하지 않는 종목 차단
 - **플러그 앤 플레이 브로커**: `.env` 파일의 값 하나로 모의투자 ↔ 실전투자 즉시 전환
 - **텔레그램 실시간 알림**: 매수/매도 체결, 오류, 일일 현황 모두 텔레그램으로 수신
@@ -39,7 +39,7 @@ auto_stock_machine/
 ├── analyzers/               AI 분석기
 │   ├── base_analyzer.py        추상 인터페이스
 │   ├── claude_cli_analyzer.py  Anthropic Claude (로컬 claude CLI, API 키 불필요)
-│   └── openai_analyzer.py      OpenAI ChatGPT (선택)
+│   └── gemini_analyzer.py      Google Gemini (경량 모델, 2번째 판단기)
 │
 ├── notifiers/
 │   └── telegram_notifier.py 텔레그램 알림
@@ -87,7 +87,7 @@ cp .env.example .env
 | 한국투자증권 모의투자 App Key/Secret | [KIS Developers](https://apiportal.koreainvestment.com) | 필수 |
 | 한국투자증권 실전투자 App Key/Secret | [KIS Developers](https://apiportal.koreainvestment.com) | 실전 전환 시 |
 | Anthropic Claude | API 키 불필요 — `claude` CLI 구독 로그인 | 필수 (아래 참고) |
-| OpenAI ChatGPT API Key | [OpenAI Platform](https://platform.openai.com/api-keys) | 선택 |
+| Google Gemini API Key | [Google AI Studio](https://aistudio.google.com/app/apikey) | 필수 (2번째 판단기) |
 | Telegram Bot Token | 텔레그램 @BotFather | 필수 |
 | Telegram Chat ID | 텔레그램 봇과 대화 후 조회 | 필수 |
 
@@ -202,7 +202,7 @@ IS_REAL_TRADING=True
 
 - **Python 3.10+**
 - **claude CLI (Claude Code)** - Anthropic Claude 연동 (API 키 불필요, 구독 로그인)
-- **openai** - ChatGPT 연동 (선택)
+- **google-generativeai** - Gemini 연동 (경량 모델, 2번째 판단기)
 - **FinanceDataReader** - KRX 종목 데이터
 - **python-telegram-bot** - 텔레그램 알림
 - **requests** - 한국투자증권 REST API 통신

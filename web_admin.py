@@ -68,12 +68,13 @@ MODEL_OPTIONS: Dict[str, List[str]] = {
         "haiku",
         "opus",
     ],
-    "OPENAI_MODEL_NAME": [
-        "gpt-4o-mini",
-        "gpt-4o",
-        "gpt-4.1-mini",
-        "gpt-4.1",
-        "gpt-4-turbo",
+    # Gemini는 경량 모델 위주
+    "GEMINI_MODEL_NAME": [
+        "gemini-2.0-flash-lite",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash-8b",
+        "gemini-1.5-flash",
     ],
 }
 
@@ -87,8 +88,8 @@ MANAGED_KEYS: List[str] = [
     "STOP_LOSS_RATE",
     "CLAUDE_CLI_ENABLED",
     "CLAUDE_CLI_MODEL",
-    "OPENAI_API_KEY",
-    "OPENAI_MODEL_NAME",
+    "GEMINI_API_KEY",
+    "GEMINI_MODEL_NAME",
     "KIS_MOCK_APP_KEY",
     "KIS_MOCK_APP_SECRET",
     "KIS_MOCK_ACCOUNT_NUMBER",
@@ -405,7 +406,7 @@ def _count_today_ai_calls(user_id: int = 0) -> Dict[str, int]:
     """오늘자 DB trace에서 AI 엔진별 API 호출 횟수를 집계합니다."""
     import db as _db
     today_str = _cfg.now().strftime("%Y-%m-%d")
-    counts: Dict[str, int] = {"Claude": 0, "ChatGPT": 0}
+    counts: Dict[str, int] = {"Claude": 0, "Gemini": 0}
     try:
         traces = _db.get_traces(user_id, limit=500)
         for t in traces:
@@ -414,8 +415,8 @@ def _count_today_ai_calls(user_id: int = 0) -> Dict[str, int]:
             analyzer = t.get("payload", {}).get("analyzer", "")
             if "Claude" in analyzer:
                 counts["Claude"] += 1
-            elif "OpenAI" in analyzer:
-                counts["ChatGPT"] += 1
+            elif "Gemini" in analyzer:
+                counts["Gemini"] += 1
     except Exception:
         pass
     return counts
@@ -472,45 +473,33 @@ def _check_claude_cli_usage() -> Dict[str, Any]:
         return {"provider": "Claude CLI", "status": "error", "model": model, "error": str(e)[:200]}
 
 
-def _check_openai_usage() -> Dict[str, Any]:
-    """OpenAI API 상태를 확인합니다."""
+def _check_gemini_usage() -> Dict[str, Any]:
+    """Google Gemini API 상태를 확인합니다."""
     import requests as req
 
-    key = os.environ.get("OPENAI_API_KEY", "")
+    key = os.environ.get("GEMINI_API_KEY", "")
     if not key:
-        return {"provider": "OpenAI ChatGPT", "status": "not_configured"}
-    model = os.environ.get("OPENAI_MODEL_NAME", "").strip() or "gpt-4o-mini"
+        return {"provider": "Google Gemini", "status": "not_configured"}
+    model = os.environ.get("GEMINI_MODEL_NAME", "").strip() or "gemini-2.0-flash-lite"
     try:
-        # 최소 completion 요청으로 rate limit 헤더 확보
-        resp = req.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1},
+        resp = req.get(
+            f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
             timeout=10,
         )
         if resp.status_code == 200:
-            rl = {}
-            for hdr, label in [
-                ("x-ratelimit-limit-requests", "요청 한도"),
-                ("x-ratelimit-remaining-requests", "남은 요청"),
-                ("x-ratelimit-limit-tokens", "토큰 한도"),
-                ("x-ratelimit-remaining-tokens", "남은 토큰"),
-            ]:
-                val = resp.headers.get(hdr, "-")
-                rl[label] = _format_number(val)
-            return {"provider": "OpenAI ChatGPT", "status": "active", "model": model, "rate_limits": rl}
-        return {"provider": "OpenAI ChatGPT", "status": "error", "model": model, "error": f"HTTP {resp.status_code}"}
+            return {"provider": "Google Gemini", "status": "active", "model": model, "rate_limits": None}
+        return {"provider": "Google Gemini", "status": "error", "model": model, "error": f"HTTP {resp.status_code}"}
     except Exception as e:
-        return {"provider": "OpenAI ChatGPT", "status": "error", "model": model, "error": str(e)[:200]}
+        return {"provider": "Google Gemini", "status": "error", "model": model, "error": str(e)[:200]}
 
 
 def _check_all_ai_usage(user_id: int = 0) -> Dict[str, Any]:
     """모든 AI 제공자의 상태와 오늘 호출 횟수를 종합합니다."""
     providers = []
-    for check_fn in (_check_claude_cli_usage, _check_openai_usage):
+    for check_fn in (_check_claude_cli_usage, _check_gemini_usage):
         providers.append(check_fn())
     today_calls = _count_today_ai_calls(user_id=user_id)
-    label_map = {"Claude CLI": "Claude", "OpenAI ChatGPT": "ChatGPT"}
+    label_map = {"Claude CLI": "Claude", "Google Gemini": "Gemini"}
     for p in providers:
         p["today_calls"] = today_calls.get(label_map.get(p["provider"], ""), 0)
     return {"providers": providers, "checked_at": _cfg.now().strftime("%Y-%m-%d %H:%M:%S")}
@@ -532,26 +521,30 @@ def _fetch_claude_cli_models() -> List[str]:
     return ["sonnet", "haiku", "opus"]
 
 
-def _fetch_openai_models() -> List[str]:
-    """OpenAI API에서 사용 가능한 GPT 모델 목록을 가져옵니다."""
+def _fetch_gemini_models() -> List[str]:
+    """Google Gemini API에서 generateContent 지원 모델 목록을 가져옵니다."""
     import requests as req
 
-    key = os.environ.get("OPENAI_API_KEY", "")
+    key = os.environ.get("GEMINI_API_KEY", "")
     if not key:
         return []
     try:
         resp = req.get(
-            "https://api.openai.com/v1/models",
-            headers={"Authorization": f"Bearer {key}"},
+            f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
             timeout=10,
         )
         if resp.status_code != 200:
             return []
         data = resp.json()
-        models = [m["id"] for m in data.get("data", []) if m.get("id")]
-        # gpt 모델만 필터, 정렬
-        models = sorted([m for m in models if m.startswith("gpt")], reverse=True)
-        return models
+        models = []
+        for m in data.get("models", []):
+            name = m.get("name", "")  # "models/gemini-2.0-flash-lite"
+            if name.startswith("models/"):
+                name = name[len("models/"):]
+            methods = m.get("supportedGenerationMethods", [])
+            if "generateContent" in methods and "gemini" in name:
+                models.append(name)
+        return sorted(models, reverse=True)
     except Exception:
         return []
 
@@ -560,7 +553,7 @@ def _fetch_all_available_models() -> Dict[str, List[str]]:
     """모든 AI 제공자에서 사용 가능한 모델 목록을 가져옵니다."""
     return {
         "CLAUDE_CLI_MODEL": _fetch_claude_cli_models(),
-        "OPENAI_MODEL_NAME": _fetch_openai_models(),
+        "GEMINI_MODEL_NAME": _fetch_gemini_models(),
     }
 
 

@@ -27,7 +27,7 @@ BOT_TYPES = {
 DEFAULT_BOT_CONFIG = {
     "buy_auto": {
         "budget_ratio": 0.9,
-        "min_consensus": 1,
+        "min_consensus": 2,
         "max_stocks": 3,
     },
     "sell_auto": {

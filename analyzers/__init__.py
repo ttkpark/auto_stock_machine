@@ -1,6 +1,6 @@
 from .base_analyzer import BaseAnalyzer, BuyRecommendation, SellDecision, StockAnalysis
 from .claude_cli_analyzer import ClaudeCliAnalyzer
-from .openai_analyzer import OpenAIAnalyzer
+from .gemini_analyzer import GeminiAnalyzer
 
 __all__ = [
     "BaseAnalyzer",
@@ -8,5 +8,5 @@ __all__ = [
     "SellDecision",
     "StockAnalysis",
     "ClaudeCliAnalyzer",
-    "OpenAIAnalyzer",
+    "GeminiAnalyzer",
 ]

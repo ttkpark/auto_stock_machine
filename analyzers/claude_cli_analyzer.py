@@ -27,6 +27,7 @@ import tempfile
 from typing import Optional
 
 from .base_analyzer import BaseAnalyzer, BuyRecommendation, SellDecision, StockAnalysis
+from utils.claude_usage import monitor as _usage_monitor
 from utils.prompt_manager import (
     CLI_SYSTEM_PROMPT,
     build_buy_prompt_cli,
@@ -82,6 +83,8 @@ class ClaudeCliAnalyzer(BaseAnalyzer):
         - 프롬프트는 stdin으로 전달해 인자 길이/이스케이프 문제를 피합니다.
         - --output-format json 으로 받아 result 필드를 추출합니다.
         """
+        # 실제 claude CLI 호출 직전 카운트 (실패 호출도 폭주 감지 대상에 포함)
+        _usage_monitor.record_call()
         cmd = [
             self.cli_path,
             "-p",

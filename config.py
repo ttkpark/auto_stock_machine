@@ -41,8 +41,17 @@ IS_REAL_TRADING: bool = os.environ.get("IS_REAL_TRADING", "False").lower() == "t
 # 매수 시 사용할 예수금 비율 (0.9 = 90%)
 BUY_BUDGET_RATIO: float = 0.9
 
-# 최소 AI 합의 수 (추천 1개 이상이면 매수 후보 인정)
-MIN_AI_CONSENSUS: int = 1
+# 최소 AI 합의 수: 서로 다른 판단기 중 몇 개가 같은 종목을 추천해야 매수할지.
+# 기본 2 = Claude(CLI) + Gemini 둘 다 동의해야 진행 (과반수). .env로 조정 가능.
+def _safe_int_env(key: str, default: int) -> int:
+    raw = os.environ.get(key, "").strip()
+    try:
+        return int(raw) if raw else default
+    except ValueError:
+        return default
+
+
+MIN_AI_CONSENSUS: int = _safe_int_env("MIN_AI_CONSENSUS", 2)
 
 # 1회 매수 실행에서 최대 매수 종목 수
 MAX_BUY_STOCKS: int = 3
@@ -97,8 +106,10 @@ def get_broker():
 def get_analyzers() -> list:
     """활성화된 AI 분석기 목록을 반환합니다.
 
-    Claude는 API 키 대신 로컬 `claude` CLI(구독 로그인)로 판단합니다.
-    CLAUDE_CLI_ENABLED 가 "false"가 아니면 CLI 분석기를 기본 등록합니다.
+    두 개의 독립 판단기를 사용합니다:
+      - Claude(CLI): API 키 없이 로컬 `claude` CLI(구독 로그인)로 판단
+      - Gemini: GEMINI_API_KEY 가 있으면 경량 모델로 판단
+    매수는 MIN_AI_CONSENSUS(기본 2) 만큼 동의해야 진행됩니다.
     """
     analyzers = []
 
@@ -109,16 +120,16 @@ def get_analyzers() -> list:
         except Exception as e:
             logging.warning(f"ClaudeCliAnalyzer 초기화 실패: {e}")
 
-    if os.environ.get("OPENAI_API_KEY"):
+    if os.environ.get("GEMINI_API_KEY"):
         try:
-            from analyzers import OpenAIAnalyzer
-            analyzers.append(OpenAIAnalyzer())
+            from analyzers import GeminiAnalyzer
+            analyzers.append(GeminiAnalyzer())
         except Exception as e:
-            logging.warning(f"OpenAIAnalyzer 초기화 실패: {e}")
+            logging.warning(f"GeminiAnalyzer 초기화 실패: {e}")
 
     if not analyzers:
         raise RuntimeError(
             "활성화된 AI 분석기가 없습니다. claude CLI 로그인(claude login)을 확인하거나 "
-            ".env 파일에 OPENAI_API_KEY를 설정해 주세요."
+            ".env 파일에 GEMINI_API_KEY를 설정해 주세요."
         )
     return analyzers

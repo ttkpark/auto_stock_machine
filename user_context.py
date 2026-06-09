@@ -69,7 +69,8 @@ class UserContext:
     def get_analyzers(self) -> list:
         """활성화된 AI 분석기 목록을 반환합니다.
 
-        Claude는 API 키 대신 로컬 `claude` CLI(구독 로그인)로 판단합니다.
+        두 개의 독립 판단기(Claude CLI + Gemini)를 사용하며, 매수는
+        MIN_AI_CONSENSUS(기본 2)만큼 동의해야 진행됩니다.
         """
         analyzers = []
 
@@ -83,21 +84,21 @@ class UserContext:
             except Exception as e:
                 logger.warning(f"ClaudeCliAnalyzer 초기화 실패: {e}")
 
-        openai_key = self.config.get("OPENAI_API_KEY", "")
-        if openai_key:
+        gemini_key = self.config.get("GEMINI_API_KEY", "")
+        if gemini_key:
             try:
-                from analyzers import OpenAIAnalyzer
-                analyzers.append(OpenAIAnalyzer(
-                    api_key=openai_key,
-                    model_name=self.config.get("OPENAI_MODEL_NAME", ""),
+                from analyzers import GeminiAnalyzer
+                analyzers.append(GeminiAnalyzer(
+                    api_key=gemini_key,
+                    model_name=self.config.get("GEMINI_MODEL_NAME", ""),
                 ))
             except Exception as e:
-                logger.warning(f"OpenAIAnalyzer 초기화 실패: {e}")
+                logger.warning(f"GeminiAnalyzer 초기화 실패: {e}")
 
         if not analyzers:
             raise RuntimeError(
                 "활성화된 AI 분석기가 없습니다. claude CLI 로그인(claude login)을 "
-                "확인하거나 설정에서 OPENAI_API_KEY를 입력해 주세요."
+                "확인하거나 설정에서 GEMINI_API_KEY를 입력해 주세요."
             )
         return analyzers
 

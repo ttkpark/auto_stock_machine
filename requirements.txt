@@ -11,8 +11,11 @@ Flask>=3.0.0
 #   설치: npm install -g @anthropic-ai/claude-code  &&  claude login
 #   (별도 Python 패키지 불필요)
 
-# OpenAI ChatGPT AI (선택)
-openai>=1.0.0
+# Google Gemini AI (2번째 독립 판단기, 경량 모델)
+google-generativeai>=0.7.0
+
+# KRX 종목 목록 (data.krx.co.kr 기반, 환각 방지용 종목 검증)
+pykrx>=1.0.45
 
 # 텔레그램 봇
 python-telegram-bot>=21.0

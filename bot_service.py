@@ -23,11 +23,17 @@ from utils import (
     format_candidates_for_prompt,
     screen_buy_candidates,
 )
+from utils.claude_usage import monitor as claude_usage_monitor
 
 BotMode = Literal["buy", "sell", "status", "ask"]
 TRACE_PATH = Path("data/ai_traces.jsonl")
 
 logger = logging.getLogger(__name__)
+
+
+def _count_claude_analyzers(analyzers) -> int:
+    """analyzers 중 로컬 claude CLI 분석기 수를 셉니다 (호출량 예상치 산정용)."""
+    return sum(1 for a in analyzers if a.__class__.__name__ == "ClaudeCliAnalyzer")
 
 
 class TraceRecorder:
@@ -185,6 +191,13 @@ def run_buy_logic(
         market_context=market_context,
         candidates_text=candidates_text,
         user_id=trace.user_id,
+    )
+
+    # claude 호출량 모니터 시작: 매수는 분석기당 1회(recommend_buy)가 정상
+    claude_usage_monitor.begin_run(
+        expected_calls=_count_claude_analyzers(analyzers),
+        notifier=notifier,
+        label="매수(buy)",
     )
 
     recommendations = []
@@ -555,6 +568,14 @@ def run_sell_logic(broker, analyzers, notifier: TelegramNotifier, cfg, trace: Tr
         holdings = profit_holdings
 
     # ── 2단계: 종목별 분석 ──
+    # claude 호출량 모니터 시작: 종목별·분석기별 decide_sell 1회가 정상 상한
+    # (쿨다운·손절로 일부 종목은 AI 판단을 건너뛰므로 실제 호출은 이보다 적음)
+    claude_usage_monitor.begin_run(
+        expected_calls=len(holdings) * _count_claude_analyzers(analyzers),
+        notifier=notifier,
+        label="매도(sell)",
+    )
+
     atr_multiplier = getattr(cfg, "TRAILING_STOP_ATR_MULTIPLIER", 2.0)
 
     # 쿨다운 설정 로드 (사용자 설정 → 기본값 180분 = 3시간)
