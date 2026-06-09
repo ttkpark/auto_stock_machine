@@ -62,7 +62,13 @@ _SCHEDULER_STARTED = False
 
 # AI 엔진별 선택 가능한 모델 목록
 MODEL_OPTIONS: Dict[str, List[str]] = {
-    # Claude는 API 키 대신 로컬 claude CLI(구독 로그인)로 동작 → CLI 모델 별칭 사용
+    # 1) Claude API (anthropic 키 기반)
+    "CLAUDE_MODEL_NAME": [
+        "claude-haiku-4-5-latest",
+        "claude-sonnet-4-5-latest",
+        "claude-opus-4-6-latest",
+    ],
+    # 2) Claude CLI (구독 로그인) → CLI 모델 별칭
     "CLAUDE_CLI_MODEL": [
         "sonnet",
         "haiku",
@@ -86,6 +92,8 @@ MANAGED_KEYS: List[str] = [
     "MIN_AI_CONSENSUS",
     "TAKE_PROFIT_RATE",
     "STOP_LOSS_RATE",
+    "CLAUDE_API_KEY",
+    "CLAUDE_MODEL_NAME",
     "CLAUDE_CLI_ENABLED",
     "CLAUDE_CLI_MODEL",
     "GEMINI_API_KEY",
@@ -473,6 +481,38 @@ def _check_claude_cli_usage() -> Dict[str, Any]:
         return {"provider": "Claude CLI", "status": "error", "model": model, "error": str(e)[:200]}
 
 
+def _check_anthropic_usage() -> Dict[str, Any]:
+    """Anthropic Claude API 상태 및 rate limit 를 확인합니다."""
+    import requests as req
+
+    key = os.environ.get("CLAUDE_API_KEY", "")
+    if not key:
+        return {"provider": "Anthropic Claude", "status": "not_configured"}
+    model = os.environ.get("CLAUDE_MODEL_NAME", "").strip() or "claude-haiku-4-5-latest"
+    try:
+        resp = req.post(
+            "https://api.anthropic.com/v1/messages/count_tokens",
+            headers={
+                "x-api-key": key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={"model": model, "messages": [{"role": "user", "content": "hi"}]},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            rl = {
+                "요청 한도": _format_number(resp.headers.get("anthropic-ratelimit-requests-limit", "-")),
+                "남은 요청": _format_number(resp.headers.get("anthropic-ratelimit-requests-remaining", "-")),
+                "토큰 한도": _format_number(resp.headers.get("anthropic-ratelimit-tokens-limit", "-")),
+                "남은 토큰": _format_number(resp.headers.get("anthropic-ratelimit-tokens-remaining", "-")),
+            }
+            return {"provider": "Anthropic Claude", "status": "active", "model": model, "rate_limits": rl}
+        return {"provider": "Anthropic Claude", "status": "error", "model": model, "error": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"provider": "Anthropic Claude", "status": "error", "model": model, "error": str(e)[:200]}
+
+
 def _check_gemini_usage() -> Dict[str, Any]:
     """Google Gemini API 상태를 확인합니다."""
     import requests as req
@@ -496,16 +536,38 @@ def _check_gemini_usage() -> Dict[str, Any]:
 def _check_all_ai_usage(user_id: int = 0) -> Dict[str, Any]:
     """모든 AI 제공자의 상태와 오늘 호출 횟수를 종합합니다."""
     providers = []
-    for check_fn in (_check_claude_cli_usage, _check_gemini_usage):
+    for check_fn in (_check_anthropic_usage, _check_claude_cli_usage, _check_gemini_usage):
         providers.append(check_fn())
     today_calls = _count_today_ai_calls(user_id=user_id)
-    label_map = {"Claude CLI": "Claude", "Google Gemini": "Gemini"}
+    label_map = {"Anthropic Claude": "Claude", "Claude CLI": "Claude", "Google Gemini": "Gemini"}
     for p in providers:
         p["today_calls"] = today_calls.get(label_map.get(p["provider"], ""), 0)
     return {"providers": providers, "checked_at": _cfg.now().strftime("%Y-%m-%d %H:%M:%S")}
 
 
 # ── 동적 모델 목록 조회 ─────────────────────────────────────
+
+
+def _fetch_anthropic_models() -> List[str]:
+    """Anthropic API에서 사용 가능한 claude 모델 목록을 가져옵니다."""
+    import requests as req
+
+    key = os.environ.get("CLAUDE_API_KEY", "")
+    if not key:
+        return []
+    try:
+        resp = req.get(
+            "https://api.anthropic.com/v1/models?limit=100",
+            headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+        models = [m["id"] for m in data.get("data", []) if m.get("id")]
+        return sorted([m for m in models if "claude" in m], reverse=True)
+    except Exception:
+        return []
 
 
 def _fetch_claude_cli_models() -> List[str]:
@@ -552,6 +614,7 @@ def _fetch_gemini_models() -> List[str]:
 def _fetch_all_available_models() -> Dict[str, List[str]]:
     """모든 AI 제공자에서 사용 가능한 모델 목록을 가져옵니다."""
     return {
+        "CLAUDE_MODEL_NAME": _fetch_anthropic_models(),
         "CLAUDE_CLI_MODEL": _fetch_claude_cli_models(),
         "GEMINI_MODEL_NAME": _fetch_gemini_models(),
     }

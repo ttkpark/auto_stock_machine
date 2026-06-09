@@ -1,8 +1,8 @@
 """
-Google Gemini AI 분석기
+Anthropic Claude AI 분석기
 
-google-generativeai 패키지를 사용합니다.
-pip install google-generativeai
+anthropic 패키지를 사용합니다.
+pip install anthropic
 """
 import os
 import json
@@ -10,48 +10,50 @@ import logging
 import re
 from typing import Optional
 
-import google.generativeai as genai
+import anthropic
 
 from .base_analyzer import BaseAnalyzer, BuyRecommendation, SellDecision, StockAnalysis
 from utils.prompt_manager import build_buy_prompt, build_sell_prompt, build_ask_prompt
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL_NAME = "gemini-2.5-flash-lite"
-FALLBACK_MODEL_NAMES = ["gemini-flash-lite-latest", "gemini-2.0-flash", "gemini-flash-latest"]
+DEFAULT_MODEL_NAME = "claude-haiku-4-5-latest"
+FALLBACK_MODEL_NAMES = [
+    "claude-haiku-4-5-latest",
+    "claude-sonnet-4-5-latest",
+]
 
 
-class GeminiAnalyzer(BaseAnalyzer):
+class ClaudeAnalyzer(BaseAnalyzer):
     def __init__(self, api_key: str | None = None, model_name: str | None = None):
-        api_key = api_key if api_key is not None else os.environ.get("GEMINI_API_KEY", "")
+        api_key = api_key if api_key is not None else os.environ.get("CLAUDE_API_KEY", "")
         if not api_key:
             raise EnvironmentError(
-                "GEMINI_API_KEY 가 설정되어 있지 않습니다."
+                "CLAUDE_API_KEY 가 설정되어 있지 않습니다."
             )
-        genai.configure(api_key=api_key)
-        model = model_name if model_name is not None else os.environ.get("GEMINI_MODEL_NAME", "")
-        preferred_model = model.strip() or DEFAULT_MODEL_NAME
-        self.model_name = preferred_model
-        self.model = genai.GenerativeModel(preferred_model)
+        self.client = anthropic.Anthropic(api_key=api_key)
+        model = model_name if model_name is not None else os.environ.get("CLAUDE_MODEL_NAME", "")
+        self.model_name = model.strip() or DEFAULT_MODEL_NAME
         self.last_recommendation_error = ""
-        logger.info(f"[GeminiAnalyzer] 초기화 완료 (모델: {self.model_name})")
+        logger.info(f"[ClaudeAnalyzer] 초기화 완료 (모델: {self.model_name})")
 
-    def _generate_content_with_fallback(self, prompt: str):
-        model_candidates = [self.model_name] + [
-            m for m in FALLBACK_MODEL_NAMES if m != self.model_name
-        ]
+    def _create_message_with_fallback(self, prompt: str):
+        model_candidates = [self.model_name] + [m for m in FALLBACK_MODEL_NAMES if m != self.model_name]
         last_error = None
         for idx, model_name in enumerate(model_candidates):
             try:
                 if idx > 0:
                     self.model_name = model_name
-                    self.model = genai.GenerativeModel(model_name)
-                    logger.warning(f"[GeminiAnalyzer] 모델 폴백 적용: {model_name}")
-                return self.model.generate_content(prompt)
+                    logger.warning(f"[ClaudeAnalyzer] 모델 폴백 적용: {model_name}")
+                return self.client.messages.create(
+                    model=model_name,
+                    max_tokens=256,
+                    messages=[{"role": "user", "content": prompt}],
+                )
             except Exception as e:
                 last_error = e
-                logger.error(f"[GeminiAnalyzer] 모델 호출 실패 ({model_name}): {e}")
-        raise RuntimeError(f"Gemini 모델 호출 실패: {last_error}")
+                logger.error(f"[ClaudeAnalyzer] 모델 호출 실패 ({model_name}): {e}")
+        raise RuntimeError(f"Claude 모델 호출 실패: {last_error}")
 
     def recommend_buy(
         self,
@@ -68,11 +70,11 @@ class GeminiAnalyzer(BaseAnalyzer):
             user_id=user_id,
         )
         try:
-            response = self._generate_content_with_fallback(prompt)
-            raw_text = response.text.strip()
+            message = self._create_message_with_fallback(prompt)
+            raw_text = message.content[0].text.strip()
             parsed = self._parse_json(raw_text)
             if not parsed:
-                logger.warning(f"[GeminiAnalyzer] JSON 파싱 실패: {raw_text}")
+                logger.warning(f"[ClaudeAnalyzer] JSON 파싱 실패: {raw_text}")
                 self.last_recommendation_error = f"JSON 파싱 실패: {raw_text[:180]}"
                 return None
 
@@ -83,21 +85,21 @@ class GeminiAnalyzer(BaseAnalyzer):
             return BuyRecommendation(
                 stock_name=parsed.get("종목명", ""),
                 reason=parsed.get("이유", ""),
-                ai_model="Gemini",
+                ai_model="Claude",
             )
         except Exception as e:
-            logger.error(f"[GeminiAnalyzer] 매수 추천 오류: {e}")
+            logger.error(f"[ClaudeAnalyzer] 매수 추천 오류: {e}")
             self.last_recommendation_error = f"API 오류: {e}"
             return None
 
     def analyze_stock(self, stock_name: str, ticker: str, current_price: int) -> Optional[StockAnalysis]:
         prompt = build_ask_prompt(stock_name=stock_name, ticker=ticker, current_price=current_price)
         try:
-            response = self._generate_content_with_fallback(prompt)
-            raw_text = response.text.strip()
+            message = self._create_message_with_fallback(prompt)
+            raw_text = message.content[0].text.strip()
             parsed = self._parse_json(raw_text)
             if not parsed:
-                logger.warning(f"[GeminiAnalyzer] 종목 분석 JSON 파싱 실패: {raw_text}")
+                logger.warning(f"[ClaudeAnalyzer] 종목 분석 JSON 파싱 실패: {raw_text}")
                 return None
             return StockAnalysis(
                 summary=parsed.get("기업개요", ""),
@@ -106,10 +108,10 @@ class GeminiAnalyzer(BaseAnalyzer):
                 risks=parsed.get("리스크", ""),
                 opinion=parsed.get("종합의견", ""),
                 one_liner=parsed.get("한줄요약", ""),
-                ai_model="Gemini",
+                ai_model="Claude",
             )
         except Exception as e:
-            logger.error(f"[GeminiAnalyzer] 종목 분석 오류: {e}")
+            logger.error(f"[ClaudeAnalyzer] 종목 분석 오류: {e}")
             return None
 
     def decide_sell(
@@ -132,21 +134,21 @@ class GeminiAnalyzer(BaseAnalyzer):
             market_info=market_info,
         )
         try:
-            response = self._generate_content_with_fallback(prompt)
-            raw_text = response.text.strip()
+            message = self._create_message_with_fallback(prompt)
+            raw_text = message.content[0].text.strip()
             parsed = self._parse_json(raw_text)
             if not parsed:
-                logger.warning(f"[GeminiAnalyzer] 매도 판단 JSON 파싱 실패: {raw_text}")
-                return SellDecision(action="보유", reason="파싱 오류 - 안전을 위해 보유", ai_model="Gemini", is_error=True)
+                logger.warning(f"[ClaudeAnalyzer] 매도 판단 JSON 파싱 실패: {raw_text}")
+                return SellDecision(action="보유", reason="파싱 오류 - 안전을 위해 보유", ai_model="Claude", is_error=True)
 
             return SellDecision(
                 action=parsed.get("결정", "보유"),
                 reason=parsed.get("이유", ""),
-                ai_model="Gemini",
+                ai_model="Claude",
             )
         except Exception as e:
-            logger.error(f"[GeminiAnalyzer] 매도 판단 오류: {e}")
-            return SellDecision(action="보유", reason=f"API 오류: {e}", ai_model="Gemini", is_error=True)
+            logger.error(f"[ClaudeAnalyzer] 매도 판단 오류: {e}")
+            return SellDecision(action="보유", reason=f"API 오류: {e}", ai_model="Claude", is_error=True)
 
     @staticmethod
     def _parse_json(text: str) -> Optional[dict]:

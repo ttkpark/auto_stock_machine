@@ -144,7 +144,7 @@ document.addEventListener('DOMContentLoaded', function() {
   fetch('/api/available-models')
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      var modelKeys = ['CLAUDE_CLI_MODEL', 'GEMINI_MODEL_NAME'];
+      var modelKeys = ['CLAUDE_MODEL_NAME', 'CLAUDE_CLI_MODEL', 'GEMINI_MODEL_NAME'];
       modelKeys.forEach(function(key) {
         var models = data[key];
         var statusEl = document.getElementById('status-' + key);
@@ -209,7 +209,7 @@ document.addEventListener('DOMContentLoaded', function() {
       });
     })
     .catch(function(err) {
-      ['CLAUDE_CLI_MODEL', 'GEMINI_MODEL_NAME'].forEach(function(key) {
+      ['CLAUDE_MODEL_NAME', 'CLAUDE_CLI_MODEL', 'GEMINI_MODEL_NAME'].forEach(function(key) {
         var statusEl = document.getElementById('status-' + key);
         if (statusEl) {
           statusEl.className = 'model-error';

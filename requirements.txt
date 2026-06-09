@@ -7,11 +7,13 @@ python-dotenv>=1.0.0
 # 웹 설정 관리자
 Flask>=3.0.0
 
-# Anthropic Claude는 API 패키지 대신 로컬 `claude` CLI(구독 로그인)로 동작합니다.
-#   설치: npm install -g @anthropic-ai/claude-code  &&  claude login
-#   (별도 Python 패키지 불필요)
+# Anthropic Claude API (1번째 판단기)
+anthropic>=0.34.0
 
-# Google Gemini AI (2번째 독립 판단기, 경량 모델)
+# Anthropic Claude CLI (2번째 판단기): API 키 없이 로컬 `claude` CLI(구독 로그인)
+#   설치: npm install -g @anthropic-ai/claude-code  &&  claude login
+
+# Google Gemini API (3번째 판단기, 경량 모델)
 google-generativeai>=0.7.0
 
 # KRX 종목 목록 (data.krx.co.kr 기반, 환각 방지용 종목 검증)

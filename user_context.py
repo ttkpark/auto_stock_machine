@@ -69,10 +69,22 @@ class UserContext:
     def get_analyzers(self) -> list:
         """활성화된 AI 분석기 목록을 반환합니다.
 
-        두 개의 독립 판단기(Claude CLI + Gemini)를 사용하며, 매수는
-        MIN_AI_CONSENSUS(기본 2)만큼 동의해야 진행됩니다.
+        최대 3개의 독립 판단기(Claude API + Claude CLI + Gemini)를 사용하며,
+        매수는 MIN_AI_CONSENSUS(기본 2)만큼 동의해야 진행됩니다.
+        무응답(장애) 엔진은 합의에서 자동 제외됩니다.
         """
         analyzers = []
+
+        claude_api_key = self.config.get("CLAUDE_API_KEY", "")
+        if claude_api_key:
+            try:
+                from analyzers import ClaudeAnalyzer
+                analyzers.append(ClaudeAnalyzer(
+                    api_key=claude_api_key,
+                    model_name=self.config.get("CLAUDE_MODEL_NAME", ""),
+                ))
+            except Exception as e:
+                logger.warning(f"ClaudeAnalyzer(API) 초기화 실패: {e}")
 
         cli_enabled = self.config.get("CLAUDE_CLI_ENABLED", "true").lower() != "false"
         if cli_enabled:

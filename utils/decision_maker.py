@@ -18,8 +18,23 @@ class DecisionMaker:
         """
         min_consensus: 매수 결정을 위해 최소 몇 개의 AI가 동의해야 하는지.
                        기본값 2 (3개 중 2개 이상 동의 시 매수).
+
+        ※ 죽은(응답 없는) 엔진 자동 제외:
+          실제 적용되는 합의 수는 min(min_consensus, 응답한 엔진 수)로 조정됩니다.
+          예) 설정 2 + 3개 중 1개만 응답 → 1표로 매수 가능(나머지 장애로 간주).
+              설정 2 + 2개 응답(서로 다른 종목) → 여전히 합의 실패(안전 유지).
         """
         self.min_consensus = min_consensus
+
+    def _effective_consensus(self, responded: int) -> int:
+        """응답한 엔진 수에 맞춰 실제 합의 임계값을 산정합니다 (죽은 엔진 자동 제외)."""
+        eff = max(1, min(self.min_consensus, responded))
+        if eff < self.min_consensus:
+            logger.warning(
+                f"[DecisionMaker] 일부 판단기 무응답 → 합의 임계값 {self.min_consensus}→{eff} "
+                f"로 조정 (응답 {responded}개). 살아있는 엔진만으로 판단합니다."
+            )
+        return eff
 
     def find_buy_consensus(
         self, recommendations: list[Optional[BuyRecommendation]]
@@ -37,8 +52,9 @@ class DecisionMaker:
         name_counter = Counter(r.stock_name for r in valid)
         logger.info(f"[DecisionMaker] AI 추천 집계: {dict(name_counter)}")
 
+        effective = self._effective_consensus(len(valid))
         top_stock, top_count = name_counter.most_common(1)[0]
-        if top_count >= self.min_consensus:
+        if top_count >= effective:
             ai_names = [r.ai_model for r in valid if r.stock_name == top_stock]
             logger.info(
                 f"[DecisionMaker] 합의 종목 선정: '{top_stock}' "
@@ -48,7 +64,7 @@ class DecisionMaker:
 
         logger.info(
             f"[DecisionMaker] 합의 실패. 최다 추천: '{top_stock}' ({top_count}표) "
-            f"- 최소 {self.min_consensus}표 필요."
+            f"- 최소 {effective}표 필요."
         )
         return None
 
@@ -68,12 +84,13 @@ class DecisionMaker:
         name_counter = Counter(r.stock_name for r in valid)
         logger.info(f"[DecisionMaker] AI 추천 집계: {dict(name_counter)}")
 
-        agreed = [name for name, count in name_counter.most_common() if count >= self.min_consensus]
+        effective = self._effective_consensus(len(valid))
+        agreed = [name for name, count in name_counter.most_common() if count >= effective]
         if not agreed:
             top_stock, top_count = name_counter.most_common(1)[0]
             logger.info(
                 f"[DecisionMaker] 합의 실패. 최다 추천: '{top_stock}' ({top_count}표) "
-                f"- 최소 {self.min_consensus}표 필요."
+                f"- 최소 {effective}표 필요."
             )
             return []
 

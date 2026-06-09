@@ -106,12 +106,21 @@ def get_broker():
 def get_analyzers() -> list:
     """활성화된 AI 분석기 목록을 반환합니다.
 
-    두 개의 독립 판단기를 사용합니다:
-      - Claude(CLI): API 키 없이 로컬 `claude` CLI(구독 로그인)로 판단
-      - Gemini: GEMINI_API_KEY 가 있으면 경량 모델로 판단
-    매수는 MIN_AI_CONSENSUS(기본 2) 만큼 동의해야 진행됩니다.
+    최대 3개의 독립 판단기를 사용합니다:
+      1) Claude(API): CLAUDE_API_KEY 가 있으면 anthropic API로 판단
+      2) Claude(CLI): API 키 없이 로컬 `claude` CLI(구독 로그인)로 판단
+      3) Gemini(API): GEMINI_API_KEY 가 있으면 경량 모델로 판단
+    매수는 MIN_AI_CONSENSUS(기본 2) 만큼 동의해야 진행되며,
+    무응답(장애) 엔진은 자동 제외됩니다(살아있는 엔진 수에 맞춰 합의 임계값 조정).
     """
     analyzers = []
+
+    if os.environ.get("CLAUDE_API_KEY"):
+        try:
+            from analyzers import ClaudeAnalyzer
+            analyzers.append(ClaudeAnalyzer())
+        except Exception as e:
+            logging.warning(f"ClaudeAnalyzer(API) 초기화 실패: {e}")
 
     if os.environ.get("CLAUDE_CLI_ENABLED", "true").lower() != "false":
         try:
@@ -129,7 +138,7 @@ def get_analyzers() -> list:
 
     if not analyzers:
         raise RuntimeError(
-            "활성화된 AI 분석기가 없습니다. claude CLI 로그인(claude login)을 확인하거나 "
-            ".env 파일에 GEMINI_API_KEY를 설정해 주세요."
+            "활성화된 AI 분석기가 없습니다. CLAUDE_API_KEY 또는 GEMINI_API_KEY를 설정하거나 "
+            "claude CLI 로그인(claude login)을 확인해 주세요."
         )
     return analyzers
